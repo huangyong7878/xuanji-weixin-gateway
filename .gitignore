@@ -1,0 +1,4 @@
+.data/
+*.tgz
+package/
+.DS_Store
