@@ -12,7 +12,7 @@
 
 ## Demo
 
-[![Weixin Gateway Demo](./demo-cover.png)](./demo.mp4)
+[![Weixin Gateway Demo](./demo-cover.png)](https://github.com/huangyong7878/xuanji-weixin-gateway/releases/download/v0.1.0/demo.mp4)
 
 - 点击封面图可查看演示视频
 - 当前视频展示的是：
