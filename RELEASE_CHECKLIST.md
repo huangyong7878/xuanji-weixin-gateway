@@ -31,7 +31,7 @@ Use this checklist before publishing `weixin-gateway`.
 ## Packaging
 
 - [ ] confirm package name/version
-- [ ] confirm whether package name should stay `@xuanji/weixin-gateway` or become neutral
+- [x] package name set to `@bryanhuang7878/weixin-gateway`
 - [ ] decide whether `private` should be removed from `package.json`
 - [ ] add repository/homepage/bugs metadata if publishing to npm
 - [ ] confirm license choice

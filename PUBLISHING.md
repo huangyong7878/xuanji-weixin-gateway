@@ -6,7 +6,7 @@ This file captures the remaining manual decisions before publishing `weixin-gate
 
 Current package name:
 
-- `@xuanji/weixin-gateway`
+- `@bryanhuang7878/weixin-gateway`
 
 If the goal is a fully neutral open-source project, consider whether this should become:
 

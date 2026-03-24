@@ -1,5 +1,7 @@
 # Weixin Gateway
 
+[![npm version](https://img.shields.io/npm/v/%40bryanhuang7878%2Fweixin-gateway)](https://www.npmjs.com/package/@bryanhuang7878/weixin-gateway)
+
 一个独立的微信网关，可对接任意上游 Agent 服务。
 
 - [License](./LICENSE)
@@ -10,9 +12,28 @@
 - [Publishing Notes](./PUBLISHING.md)
 - [FastAPI Demo](./examples/fastapi-demo/README.md)
 
+## npm
+
+已发布到 npm：
+
+- `@bryanhuang7878/weixin-gateway`
+
+安装：
+
+```bash
+npm install -g @bryanhuang7878/weixin-gateway
+```
+
+安装后可直接使用：
+
+```bash
+weixin-gateway health
+weixin-gateway login:start
+```
+
 ## Demo
 
-[![Weixin Gateway Demo](./demo-cover.png)](https://github.com/huangyong7878/xuanji-weixin-gateway/releases/download/v0.1.0/demo.mp4)
+[![Weixin Gateway Demo](./demo-cover.png)](https://youtu.be/kmpNYUXBEZo)
 
 - 点击封面图可查看演示视频
 - 当前视频展示的是：
@@ -57,8 +78,16 @@
 
 ### 1. 启动服务
 
+如果你已经全局安装了 npm 包：
+
 ```bash
-cd apps/weixin-gateway
+weixin-gateway
+```
+
+如果你是在仓库源码里本地开发：
+
+```bash
+cd /Users/yonghuang/Codes/xuanji-weixin-gateway
 node src/server.js
 ```
 
@@ -71,7 +100,7 @@ node src/server.js
 **CLI**
 
 ```bash
-node src/cli.js login:start
+weixin-gateway login:start
 ```
 
 会输出：
@@ -83,13 +112,13 @@ node src/cli.js login:start
 扫码后盯状态：
 
 ```bash
-node src/cli.js login:watch --session-id <session_id>
+weixin-gateway login:watch --session-id <session_id>
 ```
 
 登录成功后可查看账号：
 
 ```bash
-node src/cli.js accounts
+weixin-gateway accounts
 ```
 
 **API**
@@ -144,14 +173,14 @@ GET /accounts
 查看轮询状态：
 
 ```bash
-node src/cli.js poll:status
+weixin-gateway poll:status
 ```
 
 手动启动或停止：
 
 ```bash
-node src/cli.js poll:start
-node src/cli.js poll:stop
+weixin-gateway poll:start
+weixin-gateway poll:stop
 ```
 
 **API**
@@ -582,19 +611,19 @@ Content-Type: application/json
 常用命令：
 
 ```bash
-node src/cli.js health
-node src/cli.js accounts
-node src/cli.js accounts:show --account-id <account_id>
-node src/cli.js accounts:remove --account-id <account_id>
-node src/cli.js login:start
-node src/cli.js login:status --session-id <session_id>
-node src/cli.js login:watch --session-id <session_id>
-node src/cli.js login:cancel --session-id <session_id>
-node src/cli.js poll:status
-node src/cli.js poll:start
-node src/cli.js poll:stop
-node src/cli.js typing:send --account-id <account_id> --to-user-id <user_id>
-node src/cli.js typing:cancel --account-id <account_id> --to-user-id <user_id>
+weixin-gateway health
+weixin-gateway accounts
+weixin-gateway accounts:show --account-id <account_id>
+weixin-gateway accounts:remove --account-id <account_id>
+weixin-gateway login:start
+weixin-gateway login:status --session-id <session_id>
+weixin-gateway login:watch --session-id <session_id>
+weixin-gateway login:cancel --session-id <session_id>
+weixin-gateway poll:status
+weixin-gateway poll:start
+weixin-gateway poll:stop
+weixin-gateway typing:send --account-id <account_id> --to-user-id <user_id>
+weixin-gateway typing:cancel --account-id <account_id> --to-user-id <user_id>
 ```
 
 ### 用 API
@@ -1011,8 +1040,8 @@ node src/cli.js typing:cancel --account-id <account_id> --to-user-id <user_id>
 **CLI**
 
 ```bash
-node src/cli.js typing:send --account-id <account_id> --to-user-id <user_id>
-node src/cli.js typing:cancel --account-id <account_id> --to-user-id <user_id>
+weixin-gateway typing:send --account-id <account_id> --to-user-id <user_id>
+weixin-gateway typing:cancel --account-id <account_id> --to-user-id <user_id>
 ```
 
 **API**
@@ -1323,10 +1352,10 @@ pnpm cli -- login:start
 
 如果你是第一次接入，最顺的路径是：
 
-1. 启动 `node src/server.js`
-2. 执行 `node src/cli.js login:start`
-3. 扫码后执行 `node src/cli.js login:watch --session-id <session_id>`
-4. 用 `node src/cli.js accounts` 确认账号已登录
-5. 用 `node src/cli.js poll:status` 确认轮询在运行
+1. 启动 `weixin-gateway`
+2. 执行 `weixin-gateway login:start`
+3. 扫码后执行 `weixin-gateway login:watch --session-id <session_id>`
+4. 用 `weixin-gateway accounts` 确认账号已登录
+5. 用 `weixin-gateway poll:status` 确认轮询在运行
 6. 配置 `UPSTREAM_BASE_URL` 和 `UPSTREAM_EVENTS_PATH`
 7. 开始用 `/send` 和上游事件回调接入你的 Agent
