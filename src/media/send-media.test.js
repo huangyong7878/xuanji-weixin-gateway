@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 
 import { sendMediaFromPayload } from './send-media.js'
 
@@ -229,5 +232,101 @@ test('sendMediaFromPayload uploads and sends voice message', async () => {
   assert.equal(sendBody.msg.context_token, 'ctx-voice')
   assert.equal(sendBody.msg.item_list[0].type, 3)
   assert.equal(sendBody.msg.item_list[0].voice_item.media.encrypt_query_param, 'download-token-voice')
+  assert.equal(sendBody.msg.item_list[0].voice_item.encode_type, 7)
+})
+
+test('sendMediaFromPayload accepts absolute local file path', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'weixin-local-file-'))
+  const localFile = path.join(tempRoot, 'report.pdf')
+  await fs.writeFile(localFile, Buffer.from([1, 2, 3, 4]))
+
+  const calls = []
+  const originalFetch = global.fetch
+  global.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init })
+    if (String(url).endsWith('/ilink/bot/getuploadurl')) {
+      return {
+        ok: true,
+        status: 200,
+        async text() { return JSON.stringify({ ret: 0, upload_param: 'upload-token-local' }) },
+      }
+    }
+    if (String(url).startsWith('https://novac2c.cdn.weixin.qq.com/c2c/upload?')) {
+      return {
+        status: 200,
+        headers: { get(name) { return name.toLowerCase() === 'x-encrypted-param' ? 'download-token-local' : null } },
+        async text() { return '' },
+      }
+    }
+    if (String(url).endsWith('/ilink/bot/sendmessage')) {
+      return {
+        ok: true,
+        status: 200,
+        async text() { return JSON.stringify({ ret: 0 }) },
+      }
+    }
+    throw new Error(`unexpected fetch: ${url}`)
+  }
+
+  await sendMediaFromPayload(ACCOUNT, {
+    to_user_id: 'user-local',
+    context_token: '',
+    items: [{ type: 'file', file_type: 4, url: localFile }],
+  })
+
+  global.fetch = originalFetch
+  await fs.rm(tempRoot, { recursive: true, force: true })
+
+  const sendCall = calls.find((entry) => entry.url.endsWith('/ilink/bot/sendmessage'))
+  assert.ok(sendCall)
+  const sendBody = JSON.parse(String(sendCall.init.body))
+  assert.equal(sendBody.msg.item_list[0].file_item.file_name, 'report.pdf')
+})
+
+test('sendMediaFromPayload accepts file url', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'weixin-file-url-'))
+  const localFile = path.join(tempRoot, 'voice.mp3')
+  await fs.writeFile(localFile, Buffer.from([9, 8, 7, 6]))
+
+  const calls = []
+  const originalFetch = global.fetch
+  global.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init })
+    if (String(url).endsWith('/ilink/bot/getuploadurl')) {
+      return {
+        ok: true,
+        status: 200,
+        async text() { return JSON.stringify({ ret: 0, upload_param: 'upload-token-file-url' }) },
+      }
+    }
+    if (String(url).startsWith('https://novac2c.cdn.weixin.qq.com/c2c/upload?')) {
+      return {
+        status: 200,
+        headers: { get(name) { return name.toLowerCase() === 'x-encrypted-param' ? 'download-token-file-url' : null } },
+        async text() { return '' },
+      }
+    }
+    if (String(url).endsWith('/ilink/bot/sendmessage')) {
+      return {
+        ok: true,
+        status: 200,
+        async text() { return JSON.stringify({ ret: 0 }) },
+      }
+    }
+    throw new Error(`unexpected fetch: ${url}`)
+  }
+
+  await sendMediaFromPayload(ACCOUNT, {
+    to_user_id: 'user-file-url',
+    context_token: 'ctx-file',
+    items: [{ type: 'file', file_type: 3, url: `file://${localFile}` }],
+  })
+
+  global.fetch = originalFetch
+  await fs.rm(tempRoot, { recursive: true, force: true })
+
+  const sendCall = calls.find((entry) => entry.url.endsWith('/ilink/bot/sendmessage'))
+  assert.ok(sendCall)
+  const sendBody = JSON.parse(String(sendCall.init.body))
   assert.equal(sendBody.msg.item_list[0].voice_item.encode_type, 7)
 })

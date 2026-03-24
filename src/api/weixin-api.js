@@ -39,6 +39,11 @@ export const WeixinMessageState = {
   FINISH: 2,
 }
 
+export const WeixinTypingStatus = {
+  TYPING: 1,
+  CANCEL: 2,
+}
+
 export const WeixinMessageItemType = {
   TEXT: 1,
   IMAGE: 2,
@@ -227,6 +232,33 @@ export async function getUpdates(account, cursor = '') {
     },
     buildHeaders(account),
     'getUpdates',
+  )
+}
+
+export async function getConfig(account, payload) {
+  return await postJson(
+    joinUrl(account.api_base_url, 'ilink/bot/getconfig'),
+    {
+      ilink_user_id: payload.ilink_user_id,
+      context_token: payload.context_token || '',
+      base_info: buildBaseInfo(),
+    },
+    buildHeaders(account),
+    'getConfig',
+  )
+}
+
+export async function sendTyping(account, payload) {
+  return await postJson(
+    joinUrl(account.api_base_url, 'ilink/bot/sendtyping'),
+    {
+      ilink_user_id: payload.ilink_user_id,
+      typing_ticket: payload.typing_ticket,
+      status: payload.status,
+      base_info: buildBaseInfo(),
+    },
+    buildHeaders(account),
+    'sendTyping',
   )
 }
 

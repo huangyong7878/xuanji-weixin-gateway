@@ -3,6 +3,7 @@ import { URL } from 'node:url'
 
 import { loadConfig } from './config.js'
 import { cancelQrLogin, completeQrLogin, getQrLoginStatus, startQrLogin } from './auth/login-qr.js'
+import { getConfig as getWeixinConfig, sendTyping as sendWeixinTyping, WeixinTypingStatus } from './api/weixin-api.js'
 import { FileStore } from './store/file-store.js'
 import { pollAccountOnce, pollAllAccountsOnce, sendOutboundMessage } from './runtime/poller.js'
 import { PollingLoop } from './runtime/loop.js'
@@ -231,6 +232,59 @@ async function handleRequest(req, res) {
     sendJson(res, 200, {
       ok: true,
       account: buildAccountView(account),
+    })
+    return
+  }
+
+  if (method === 'POST' && url.pathname === '/typing') {
+    const body = await readJson(req)
+    const accountId = String(body.account_id || '').trim()
+    const ilinkUserId = String(body.to_user_id || body.ilink_user_id || '').trim()
+    const contextToken = String(body.context_token || '').trim()
+    const statusRaw = String(body.status || 'typing').trim().toLowerCase()
+    if (!accountId || !ilinkUserId) {
+      sendJson(res, 400, {
+        ok: false,
+        error: 'account_id and to_user_id are required',
+      })
+      return
+    }
+    const account = await store.getAccount(accountId)
+    if (!account) {
+      sendJson(res, 404, {
+        ok: false,
+        error: 'unknown account_id',
+      })
+      return
+    }
+    const status =
+      statusRaw === 'cancel' || statusRaw === 'stop'
+        ? WeixinTypingStatus.CANCEL
+        : WeixinTypingStatus.TYPING
+    const configResp = await getWeixinConfig(account, {
+      ilink_user_id: ilinkUserId,
+      context_token: contextToken,
+    })
+    const typingTicket = String(configResp?.typing_ticket || '').trim()
+    if (!typingTicket) {
+      sendJson(res, 502, {
+        ok: false,
+        error: 'missing typing_ticket from getconfig',
+      })
+      return
+    }
+    await sendWeixinTyping(account, {
+      ilink_user_id: ilinkUserId,
+      typing_ticket: typingTicket,
+      status,
+    })
+    sendJson(res, 200, {
+      ok: true,
+      typing: {
+        account_id: accountId,
+        to_user_id: ilinkUserId,
+        status: status === WeixinTypingStatus.CANCEL ? 'cancel' : 'typing',
+      },
     })
     return
   }

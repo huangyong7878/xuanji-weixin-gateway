@@ -78,6 +78,9 @@ export function createGatewayClient(baseUrl) {
         {},
       )
     },
+    async sendTyping(payload) {
+      return await requestJson(baseUrl, 'POST', '/typing', payload)
+    },
     async registerAccount(payload) {
       return await requestJson(baseUrl, 'POST', '/accounts/register', payload)
     },

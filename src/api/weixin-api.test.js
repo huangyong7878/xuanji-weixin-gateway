@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getUpdates, sendTextMessage } from './weixin-api.js'
+import { getConfig, getUpdates, sendTextMessage, sendTyping } from './weixin-api.js'
 
 const ACCOUNT = {
   api_base_url: 'https://ilinkai.weixin.qq.com',
@@ -86,4 +86,57 @@ test('sendTextMessage throws on business-level ret error', async () => {
   )
 
   global.fetch = originalFetch
+})
+
+test('getConfig calls ilink/bot/getconfig with ilink_user_id and context_token', async () => {
+  const calls = []
+  const originalFetch = global.fetch
+  global.fetch = async (url, init) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify({ ret: 0, typing_ticket: 'ticket-1' })
+      },
+    }
+  }
+
+  const result = await getConfig(ACCOUNT, {
+    ilink_user_id: 'user-1',
+    context_token: 'ctx-1',
+  })
+  global.fetch = originalFetch
+
+  assert.equal(result.typing_ticket, 'ticket-1')
+  assert.match(String(calls[0].url), /ilink\/bot\/getconfig$/)
+  const body = JSON.parse(String(calls[0].init.body))
+  assert.equal(body.ilink_user_id, 'user-1')
+  assert.equal(body.context_token, 'ctx-1')
+})
+
+test('sendTyping calls ilink/bot/sendtyping with typing_ticket and status', async () => {
+  const calls = []
+  const originalFetch = global.fetch
+  global.fetch = async (url, init) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify({ ret: 0 })
+      },
+    }
+  }
+
+  await sendTyping(ACCOUNT, {
+    ilink_user_id: 'user-1',
+    typing_ticket: 'ticket-1',
+    status: 1,
+  })
+  global.fetch = originalFetch
+
+  assert.match(String(calls[0].url), /ilink\/bot\/sendtyping$/)
+  const body = JSON.parse(String(calls[0].init.body))
+  assert.equal(body.ilink_user_id, 'user-1')
+  assert.equal(body.typing_ticket, 'ticket-1')
+  assert.equal(body.status, 1)
 })

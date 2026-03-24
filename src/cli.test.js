@@ -241,3 +241,44 @@ test('runCli accounts:remove prints removed account summary', async () => {
   assert.ok(lines.some((line) => line.includes('removed=bot-1')))
   assert.ok(lines.some((line) => line.includes('polling=false')))
 })
+
+test('runCli typing:send posts typing payload and prints summary', async () => {
+  const calls = []
+  const originalFetch = global.fetch
+  global.fetch = async (url, init) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify({
+          ok: true,
+          typing: {
+            account_id: 'bot-1',
+            to_user_id: 'user-1',
+            status: 'typing',
+          },
+        })
+      },
+    }
+  }
+
+  const lines = []
+  const code = await runCli(
+    ['typing:send', '--account-id', 'bot-1', '--to-user-id', 'user-1', '--context-token', 'ctx-1'],
+    {
+      log: (...args) => lines.push(args.join(' ')),
+      error: (...args) => lines.push(`ERR:${args.join(' ')}`),
+    },
+  )
+
+  global.fetch = originalFetch
+
+  assert.equal(code, 0)
+  assert.match(String(calls[0].url), /\/typing$/)
+  const body = JSON.parse(String(calls[0].init.body))
+  assert.equal(body.account_id, 'bot-1')
+  assert.equal(body.to_user_id, 'user-1')
+  assert.equal(body.context_token, 'ctx-1')
+  assert.equal(body.status, 'typing')
+  assert.ok(lines.some((line) => line.includes('status=typing')))
+})

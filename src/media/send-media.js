@@ -28,6 +28,14 @@ function createClientId() {
   return `xuanji-weixin-${crypto.randomUUID()}`
 }
 
+function isHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || ''))
+}
+
+function isFileUrl(value) {
+  return /^file:\/\//i.test(String(value || ''))
+}
+
 async function downloadRemoteFileToTemp(url, destDir) {
   const response = await fetch(url)
   if (!response.ok) {
@@ -39,6 +47,36 @@ async function downloadRemoteFileToTemp(url, destDir) {
   const filePath = path.join(destDir, `weixin-media-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`)
   await fs.writeFile(filePath, buf)
   return filePath
+}
+
+async function resolveMediaSourceToLocalPath(source, destDir) {
+  const value = String(source || '').trim()
+  if (!value) {
+    throw new Error('missing media url')
+  }
+
+  if (isHttpUrl(value)) {
+    return {
+      filePath: await downloadRemoteFileToTemp(value, destDir),
+      cleanup: true,
+    }
+  }
+
+  if (isFileUrl(value)) {
+    return {
+      filePath: new URL(value),
+      cleanup: false,
+    }
+  }
+
+  if (path.isAbsolute(value)) {
+    return {
+      filePath: value,
+      cleanup: false,
+    }
+  }
+
+  throw new Error('unsupported media url: expected http(s), file://, or absolute local path')
 }
 
 async function uploadLocalFileToWeixin(account, { filePath, toUserId, mediaType, cdnBaseUrl }) {
@@ -72,7 +110,10 @@ async function uploadLocalFileToWeixin(account, { filePath, toUserId, mediaType,
   })
 
   return {
-    fileName: path.basename(filePath),
+    fileName:
+      filePath instanceof URL
+        ? path.basename(filePath.pathname)
+        : path.basename(String(filePath)),
     downloadEncryptedQueryParam: downloadParam,
     aeskey: aeskey.toString('hex'),
     fileSize: rawsize,
@@ -197,7 +238,8 @@ export async function sendMediaFromPayload(account, payload, options = {}) {
     throw new Error(`unsupported file_type: ${fileType}`)
   }
   const tempDir = options.tempDir || path.join(os.tmpdir(), 'weixin-gateway-media')
-  const localPath = await downloadRemoteFileToTemp(String(item.url), tempDir)
+  const source = await resolveMediaSourceToLocalPath(String(item.url), tempDir)
+  const localPath = source.filePath instanceof URL ? source.filePath : String(source.filePath)
   const cdnBaseUrl = account.cdn_base_url || DEFAULT_CDN_BASE_URL
   const uploadMediaType =
     fileType === 1
@@ -242,6 +284,8 @@ export async function sendMediaFromPayload(account, payload, options = {}) {
       uploaded,
     })
   } finally {
-    await fs.rm(localPath, { force: true })
+    if (source.cleanup) {
+      await fs.rm(localPath, { force: true })
+    }
   }
 }

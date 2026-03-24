@@ -24,6 +24,8 @@ function printUsage(io = console) {
   node src/cli.js poll:stop
   node src/cli.js poll:once
   node src/cli.js poll:account --account-id ACCOUNT_ID
+  node src/cli.js typing:send --account-id ACCOUNT_ID --to-user-id USER_ID [--context-token TOKEN]
+  node src/cli.js typing:cancel --account-id ACCOUNT_ID --to-user-id USER_ID [--context-token TOKEN]
 
 可选:
   --gateway-base-url URL   默认 http://127.0.0.1:8787
@@ -149,6 +151,12 @@ function printResult(command, data, io = console, jsonMode = false) {
     case 'poll:account':
       io.log(JSON.stringify(data.result || {}, null, 2))
       return
+    case 'typing:send':
+    case 'typing:cancel':
+      io.log(`account_id=${data.typing?.account_id || ''}`)
+      io.log(`to_user_id=${data.typing?.to_user_id || ''}`)
+      io.log(`status=${data.typing?.status || ''}`)
+      return
     default:
       io.log(JSON.stringify(data, null, 2))
   }
@@ -225,6 +233,15 @@ export async function runCli(argv, io = console) {
         break
       case 'poll:account':
         result = await client.pollAccountOnce(requireFlag(flags, 'account-id'))
+        break
+      case 'typing:send':
+      case 'typing:cancel':
+        result = await client.sendTyping({
+          account_id: requireFlag(flags, 'account-id'),
+          to_user_id: requireFlag(flags, 'to-user-id'),
+          context_token: getFlag(flags, 'context-token'),
+          status: command === 'typing:cancel' ? 'cancel' : 'typing',
+        })
         break
       default:
         io.error(`未知命令: ${command}`)

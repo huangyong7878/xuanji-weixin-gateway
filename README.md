@@ -1,6 +1,6 @@
 # Weixin Gateway
 
-这是一个独立的微信网关，可对接任意上游 Agent 服务。
+一个独立的微信网关，可对接任意上游 Agent 服务。
 
 - [License](./LICENSE)
 - [Contributing](./CONTRIBUTING.md)
@@ -8,145 +8,550 @@
 - [Release Checklist](./RELEASE_CHECKLIST.md)
 - [Repo Split Guide](./REPO_SPLIT_GUIDE.md)
 - [Publishing Notes](./PUBLISHING.md)
+- [FastAPI Demo](./examples/fastapi-demo/README.md)
 
-当前阶段目标：
+## Demo
 
-- 不依赖 OpenClaw
-- 先打通文本消息版 MVP，并补齐图片/视频/通用文件发送
-- 后续逐步补齐二维码登录、typing 和更多产品化能力
+[![Weixin Gateway Demo](./demo-cover.png)](./demo.mp4)
 
-## 当前接口
+- 点击封面图可查看演示视频
+- 当前视频展示的是：
+  - 扫码登录
+  - FastAPI demo 接收微信文本
+  - 文本回声回复到微信
 
-### `GET /health`
+## 适合什么场景
 
-健康检查。
+你可以把它当成一个独立服务来用：
 
-### `POST /accounts/register`
+- 管理微信 Bot 登录
+- 持续拉取微信消息
+- 把消息转发给你的 Agent 服务
+- 把 Agent 的回复发回微信
 
-注册一个微信账号配置（当前阶段手工写入 token/uin）。
-
-```json
-{
-  "account_id": "wx-account-1",
-  "api_base_url": "https://your-weixin-bot.example.com",
-  "bot_token": "token-from-login",
-  "wechat_uin": "base64-uin"
-}
-```
-
-### `GET /accounts`
-
-查看已注册账号（隐藏 token）。
-
-### `GET /accounts/:account_id`
-
-查看单个账号详情和最近轮询状态，包括：
-
-- `polling_running`
-- `last_forwarded`
-- `last_error`
-- `last_cursor`
-
-### `DELETE /accounts/:account_id`
-
-删除一个账号。
-
-说明：
-
-- 如果删除后已没有任何账号，gateway 会自动停止后台轮询
-
-### `POST /login/qr/start`
-
-创建一个二维码登录会话。
-
-当前阶段这里已经会真实调用：
-
-- `ilink/bot/get_bot_qrcode`
-
-返回真实的二维码内容和二维码图片 URL。
-
-请求体示例：
-
-```json
-{
-  "account_id": "wx-account-1",
-  "api_base_url": "https://your-weixin-bot.example.com"
-}
-```
-
-### `GET /login/qr/status?session_id=...`
-
-查看登录会话状态：
-
-- `pending`
-- `scaned`
-- `completed`
-- `expired`
-- `cancelled`
-
-当前阶段这里会真实调用：
-
-- `ilink/bot/get_qrcode_status`
-
-如果扫码已确认，并且返回了：
-
-- `bot_token`
-- `ilink_bot_id`
-- `baseurl`
-
-系统会自动把账号写入本地 store，并把会话标记为 `completed`。
-
-### `POST /login/qr/complete`
-
-当前阶段用于**手工完成一次登录**，把真实拿到的 `bot_token` / `wechat_uin` 写入账号。
-
-```json
-{
-  "session_id": "xxx",
-  "api_base_url": "https://your-weixin-bot.example.com",
-  "bot_token": "token",
-  "wechat_uin": "base64-uin"
-}
-```
-
-### `POST /login/qr/cancel`
-
-取消一个登录会话。
-
-### `POST /accounts/:account_id/poll-once`
-
-对单个账号执行一次 `getupdates` 长轮询拉取。
-
-### `POST /poll/run-once`
-
-对所有账号执行一次轮询。
-
-### `POST /poll/start`
-
-启动后台轮询 loop。
-
-### `GET /poll/status`
-
-查看当前轮询状态，包括：
-
-- 是否正在运行
-- 轮询间隔
-- 最近一次开始/结束时间
-- 最近一次错误
-
-### `POST /poll/stop`
-
-停止后台轮询 loop。
-
-### `POST /send`
-
-上游 Agent -> Gateway 的出站消息接口。当前阶段支持：
+当前已支持：
 
 - 文本
-- 图片（`file_type=1`）
-- 视频（`file_type=2`）
-- 语音（`file_type=3`）
-- 通用文件（`file_type=4`）
+- 图片
+- 视频
+- 语音
+- 文件
+- 二维码登录
+- 自动轮询
+- 账号管理
+- API / CLI
+
+## 最小上游示例
+
+如果你想最快看懂“上游应该怎么接”，可以直接看：
+
+- [examples/fastapi-demo](./examples/fastapi-demo/README.md)
+
+这个 demo 只实现：
+
+- 扫码登录
+- 接收微信文本
+- 文本回声回复
+
+## 1 分钟上手
+
+### 1. 启动服务
+
+```bash
+cd apps/weixin-gateway
+node src/server.js
+```
+
+默认监听：
+
+- `http://127.0.0.1:8787`
+
+### 2. 登录微信账号
+
+**CLI**
+
+```bash
+node src/cli.js login:start
+```
+
+会输出：
+
+- `session_id`
+- `qrcode`
+- `qrcode_url`
+
+扫码后盯状态：
+
+```bash
+node src/cli.js login:watch --session-id <session_id>
+```
+
+登录成功后可查看账号：
+
+```bash
+node src/cli.js accounts
+```
+
+**API**
+
+创建二维码登录会话：
+
+```http
+POST /login/qr/start
+Content-Type: application/json
+```
+
+```json
+{
+  "account_id": "wx-account-1",
+  "api_base_url": "https://ilinkai.weixin.qq.com"
+}
+```
+
+返回结果里会包含：
+
+- `session_id`
+- `qrcode`
+- `qrcode_url`
+
+然后轮询状态：
+
+```http
+GET /login/qr/status?session_id=<session_id>
+```
+
+直到状态变成：
+
+- `completed`
+
+登录成功后可通过：
+
+```http
+GET /accounts
+```
+
+确认账号是否已经写入。
+
+### 3. 自动轮询
+
+默认行为：
+
+- 服务启动后，如果本地已经有账号，会自动开始轮询
+- 新账号登录成功后，也会自动开始轮询
+
+**CLI**
+
+查看轮询状态：
+
+```bash
+node src/cli.js poll:status
+```
+
+手动启动或停止：
+
+```bash
+node src/cli.js poll:start
+node src/cli.js poll:stop
+```
+
+**API**
+
+查看轮询状态：
+
+```http
+GET /poll/status
+```
+
+手动启动或停止：
+
+```http
+POST /poll/start
+POST /poll/stop
+```
+
+### 4. 对接你的上游 Agent
+
+需要配置上游服务地址：
+
+```bash
+export UPSTREAM_BASE_URL=http://127.0.0.1:8000
+export UPSTREAM_EVENTS_PATH=/callback/weixin-gateway
+```
+
+Gateway 会把入站微信消息转发到：
+
+- `UPSTREAM_BASE_URL + UPSTREAM_EVENTS_PATH`
+
+例如：
+
+- `http://127.0.0.1:8000/callback/weixin-gateway`
+
+你的上游服务需要做两件事：
+
+1. 提供一个接收微信入站事件的 HTTP 接口
+2. 在处理完成后，调用 gateway 的 `/send` 把回复发回微信
+
+最小闭环就是：
+
+微信 -> gateway -> 你的 Agent -> gateway -> 微信
+
+**CLI**
+
+这一段通常不通过 CLI 对接，而是：
+
+- 用环境变量指定上游地址
+- 让 gateway 自动把微信消息推给你的上游服务
+
+**API**
+
+需要配置：
+
+```bash
+export UPSTREAM_BASE_URL=http://127.0.0.1:8000
+export UPSTREAM_EVENTS_PATH=/callback/weixin-gateway
+```
+
+这样 gateway 会把入站事件发到：
+
+- `http://127.0.0.1:8000/callback/weixin-gateway`
+
+#### 上游 callback 要怎么实现
+
+你的上游服务需要提供一个 `POST` 接口，例如：
+
+- `POST /callback/weixin-gateway`
+
+gateway 会把微信消息以 JSON 形式发给这个接口。
+
+#### Request schema
+
+请求头：
+
+```http
+Content-Type: application/json
+Authorization: Bearer <UPSTREAM_SHARED_SECRET>
+```
+
+如果没有配置 `UPSTREAM_SHARED_SECRET`，则不会带 `Authorization`。
+
+请求体结构：
+
+```json
+{
+  "type": "message",
+  "account_id": "wx-account-1",
+  "event_id": "evt-1",
+  "chat_id": "wx-user-1",
+  "user_id": "wx-user-1",
+  "text": "你好",
+  "context_token": "ctx-1",
+  "chat_type": "c2c",
+  "raw": {}
+}
+```
+
+字段说明：
+
+- `type: string`
+  - 当前固定为 `message`
+- `account_id: string`
+  - 当前使用的微信 Bot 账号 ID
+- `event_id: string`
+  - 当前消息事件 ID，可用于去重
+- `chat_id: string`
+  - 当前会话对端 ID
+- `user_id: string`
+  - 当前用户 ID
+- `text: string`
+  - gateway 转换后的文本内容
+- `context_token: string`
+  - 回消息时建议原样带回
+- `chat_type: string`
+  - 当前阶段固定为 `c2c`
+- `raw: object`
+  - 原始微信消息对象
+
+当前 `raw` 里可能还会带：
+
+- `item_list`
+- `message_type`
+- `message_id`
+- `create_time_ms`
+
+你的上游服务收到后，至少需要：
+
+- 读取 `account_id`
+- 读取 `user_id` 或 `chat_id`
+- 读取 `text`
+- 保留 `context_token`
+
+然后生成回复。
+
+#### 上游如何接收入站图片、文件、视频、语音
+
+**CLI**
+
+这一部分通常不通过 CLI 处理。  
+入站附件会随着 callback 事件一起推给你的上游服务。
+
+**API**
+
+当用户从微信发送附件时，gateway 会先把附件下载到本地，再转发事件给上游。
+
+上游收到的事件里：
+
+- `text` 会包含附件提示
+- 事件对象里会带 `attachments`
+
+示例：
+
+```json
+{
+  "type": "message",
+  "account_id": "wx-account-1",
+  "event_id": "evt-1",
+  "chat_id": "wx-user-1",
+  "user_id": "wx-user-1",
+  "text": "用户发送了以下附件：\n- image: /path/to/image.png",
+  "context_token": "ctx-1",
+  "chat_type": "c2c",
+  "attachments": [
+    {
+      "kind": "image",
+      "path": "/Users/you/weixin-gateway/.data/inbound/weixin-inbound-1.png",
+      "filename": "weixin-inbound-1.png",
+      "mime_type": "image/png"
+    }
+  ],
+  "raw": {}
+}
+```
+
+`attachments` 当前可能出现的 `kind`：
+
+- `image`
+- `video`
+- `voice`
+- `file`
+
+建议上游这样处理：
+
+- 对图片：读取本地文件路径，交给 vision / multimodal 能力
+- 对视频：读取本地文件路径，交给视频分析链路
+- 对语音：读取本地文件路径，交给语音转写或音频理解链路
+- 对文件：读取本地文件路径，按文档或通用文件处理
+
+当前入站附件默认落盘到：
+
+- `WEIXIN_GATEWAY_DATA_DIR/inbound`
+
+如果未设置 `WEIXIN_GATEWAY_DATA_DIR`，默认是：
+
+- `./.data/inbound`
+
+#### Response schema
+
+最小要求：
+
+- 返回任意 `2xx` 状态码即可
+
+最简单可以是：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+```
+
+```json
+{
+  "ok": true
+}
+```
+
+也可以直接返回空响应体。
+
+注意：
+
+- gateway **不会**读取这个响应体里的消息内容
+- 这个 callback 的职责只是“接收事件”
+- 真正发回微信，请单独调用 gateway 的 `POST /send`
+
+#### 上游怎么把回复发回微信
+
+**CLI**
+
+如果只是手工调试，你可以直接调用 gateway 的 HTTP API。
+
+**API**
+
+你的上游服务生成回复后，需要调用 gateway 的：
+
+- `POST /send`
+
+例如 gateway 跑在本机默认端口：
+
+- `http://127.0.0.1:8787/send`
+
+文本回复示例：
+
+```json
+{
+  "account_id": "wx-account-1",
+  "to_user_id": "wx-user-1",
+  "context_token": "ctx-1",
+  "chat_type": "c2c",
+  "items": [
+    {
+      "type": "text",
+      "text": "你好，我收到了。"
+    }
+  ]
+}
+```
+
+这里最重要的是：
+
+- `account_id` 用入站事件里的 `account_id`
+- `to_user_id` 用入站事件里的 `user_id` 或 `chat_id`
+- `context_token` 尽量原样带回
+
+如果你想发图片、视频、语音或文件，也同样走 `/send`。
+
+#### `/send` request schema
+
+**CLI**
+
+当前没有单独的 `send` CLI 命令。  
+推荐方式是让你的上游服务直接调用 `POST /send`。
+
+**API**
+
+请求头：
+
+```http
+Content-Type: application/json
+```
+
+请求体结构：
+
+```json
+{
+  "account_id": "wx-account-1",
+  "to_user_id": "wx-user-1",
+  "context_token": "ctx-1",
+  "chat_type": "c2c",
+  "items": []
+}
+```
+
+字段说明：
+
+- `account_id: string`
+  - 要使用哪个微信 Bot 账号发消息
+- `to_user_id: string`
+  - 目标微信用户 ID
+- `context_token: string`
+  - 建议从入站事件原样带回
+- `chat_type: string`
+  - 当前建议固定为 `c2c`
+- `items: array`
+  - 要发送的消息内容
+
+#### `/send` 文本消息
+
+```json
+{
+  "account_id": "wx-account-1",
+  "to_user_id": "wx-user-1",
+  "context_token": "ctx-1",
+  "chat_type": "c2c",
+  "items": [
+    {
+      "type": "text",
+      "text": "你好，我收到了。"
+    }
+  ]
+}
+```
+
+#### `/send` 图片消息
+
+```json
+{
+  "account_id": "wx-account-1",
+  "to_user_id": "wx-user-1",
+  "context_token": "ctx-1",
+  "chat_type": "c2c",
+  "items": [
+    {
+      "type": "file",
+      "file_type": 1,
+      "url": "https://example.com/image.png"
+    }
+  ]
+}
+```
+
+#### `/send` 视频消息
+
+```json
+{
+  "account_id": "wx-account-1",
+  "to_user_id": "wx-user-1",
+  "context_token": "ctx-1",
+  "chat_type": "c2c",
+  "items": [
+    {
+      "type": "file",
+      "file_type": 2,
+      "url": "https://example.com/video.mp4"
+    }
+  ]
+}
+```
+
+#### `/send` 语音消息
+
+```json
+{
+  "account_id": "wx-account-1",
+  "to_user_id": "wx-user-1",
+  "context_token": "ctx-1",
+  "chat_type": "c2c",
+  "items": [
+    {
+      "type": "file",
+      "file_type": 3,
+      "url": "https://example.com/voice.mp3"
+    }
+  ]
+}
+```
+
+#### `/send` 文件消息
+
+```json
+{
+  "account_id": "wx-account-1",
+  "to_user_id": "wx-user-1",
+  "context_token": "ctx-1",
+  "chat_type": "c2c",
+  "items": [
+    {
+      "type": "file",
+      "file_type": 4,
+      "url": "https://example.com/report.pdf"
+    }
+  ]
+}
+```
+
+`file_type` 约定：
+
+- `1` 图片
+- `2` 视频
+- `3` 语音
+- `4` 文件
 
 语音当前支持的上传格式：
 
@@ -155,9 +560,567 @@
 - `.amr`
 - `.ogg`
 
-对于其他语音格式，gateway 会明确报错，而不是假装发送成功。
+媒体和文件发送约定：
 
-请求体示例：
+- `url` 支持三种形式：
+  - `https://...`
+  - `http://...`
+  - `file:///absolute/path/to/file`
+  - `/absolute/path/to/file`
+- 只要 gateway 进程自己能读到这个文件即可
+- 对 `http(s)`，gateway 会先下载文件
+- 对 `file://` 或绝对路径，gateway 会直接读取本地文件
+- gateway 会把文件转成微信可发送的媒体
+- 如果是大文件或视频，微信端可能会有短暂延迟后才显示
+
+## 推荐使用流程
+
+### 用 CLI
+
+适合本地调试、单机运行、运维排障。
+
+常用命令：
+
+```bash
+node src/cli.js health
+node src/cli.js accounts
+node src/cli.js accounts:show --account-id <account_id>
+node src/cli.js accounts:remove --account-id <account_id>
+node src/cli.js login:start
+node src/cli.js login:status --session-id <session_id>
+node src/cli.js login:watch --session-id <session_id>
+node src/cli.js login:cancel --session-id <session_id>
+node src/cli.js poll:status
+node src/cli.js poll:start
+node src/cli.js poll:stop
+node src/cli.js typing:send --account-id <account_id> --to-user-id <user_id>
+node src/cli.js typing:cancel --account-id <account_id> --to-user-id <user_id>
+```
+
+### 用 API
+
+适合接入其他 Agent、平台或自定义服务。
+
+基础地址默认是：
+
+- `http://127.0.0.1:8787`
+
+## API 概览
+
+### `GET /health`
+
+**Request**
+
+- 无请求体
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "service": "weixin-gateway",
+  "phase": "text-mvp",
+  "polling": {
+    "running": true,
+    "interval_ms": 5000
+  }
+}
+```
+
+### `GET /accounts`
+
+**Request**
+
+- 无请求体
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "accounts": [
+    {
+      "account_id": "wx-account-1",
+      "api_base_url": "https://ilinkai.weixin.qq.com",
+      "wechat_uin": "user@im.wechat",
+      "cursor": "",
+      "created_at": "2026-03-24T00:00:00.000Z",
+      "updated_at": "2026-03-24T00:00:00.000Z",
+      "status": {
+        "polling_running": true,
+        "has_cursor": false,
+        "last_forwarded": 0,
+        "last_error": "",
+        "last_cursor": "",
+        "last_poll_finished_at": ""
+      }
+    }
+  ]
+}
+```
+
+### `GET /accounts/:account_id`
+
+**Request**
+
+- 路径参数：`account_id`
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "account": {
+    "account_id": "wx-account-1",
+    "api_base_url": "https://ilinkai.weixin.qq.com",
+    "wechat_uin": "user@im.wechat",
+    "cursor": "",
+    "created_at": "2026-03-24T00:00:00.000Z",
+    "updated_at": "2026-03-24T00:00:00.000Z",
+    "status": {
+      "polling_running": true,
+      "has_cursor": false,
+      "last_forwarded": 0,
+      "last_error": "",
+      "last_cursor": "",
+      "last_poll_finished_at": ""
+    }
+  }
+}
+```
+
+找不到账号时：
+
+```json
+{
+  "ok": false,
+  "error": "unknown account_id"
+}
+```
+
+### `POST /accounts/register`
+
+用于手工注册账号。
+
+**Request**
+
+```json
+{
+  "account_id": "wx-account-1",
+  "api_base_url": "https://ilinkai.weixin.qq.com",
+  "bot_token": "token-from-login",
+  "wechat_uin": "user@im.wechat"
+}
+```
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "account": {
+    "account_id": "wx-account-1",
+    "api_base_url": "https://ilinkai.weixin.qq.com",
+    "wechat_uin": "user@im.wechat",
+    "cursor": "",
+    "created_at": "2026-03-24T00:00:00.000Z",
+    "updated_at": "2026-03-24T00:00:00.000Z",
+    "status": {
+      "polling_running": true,
+      "has_cursor": false,
+      "last_forwarded": 0,
+      "last_error": "",
+      "last_cursor": "",
+      "last_poll_finished_at": ""
+    }
+  }
+}
+```
+
+缺少字段时：
+
+```json
+{
+  "ok": false,
+  "error": "account_id, api_base_url, bot_token, wechat_uin are required"
+}
+```
+
+### `DELETE /accounts/:account_id`
+
+**Request**
+
+- 路径参数：`account_id`
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "removed": {
+    "account_id": "wx-account-1",
+    "api_base_url": "https://ilinkai.weixin.qq.com",
+    "wechat_uin": "user@im.wechat",
+    "cursor": "",
+    "created_at": "2026-03-24T00:00:00.000Z",
+    "updated_at": "2026-03-24T00:00:00.000Z",
+    "status": {
+      "polling_running": false,
+      "has_cursor": false,
+      "last_forwarded": 0,
+      "last_error": "",
+      "last_cursor": "",
+      "last_poll_finished_at": ""
+    }
+  },
+  "polling": {
+    "running": false
+  }
+}
+```
+
+### `POST /login/qr/start`
+
+**Request**
+
+```json
+{
+  "account_id": "wx-account-1",
+  "api_base_url": "https://ilinkai.weixin.qq.com"
+}
+```
+
+`account_id` 可选；不传时 gateway 会生成一个临时账号 ID。
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "session": {
+    "session_id": "sess-1",
+    "account_id": "wx-account-1",
+    "state": "pending",
+    "qrcode": "qr-123",
+    "qrcode_url": "https://example.com/qr.png"
+  }
+}
+```
+
+### `GET /login/qr/status?session_id=...`
+
+**Request**
+
+- 查询参数：`session_id`
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "session": {
+    "session_id": "sess-1",
+    "account_id": "wx-account-1",
+    "state": "completed",
+    "message": "微信登录成功。"
+  }
+}
+```
+
+状态值包括：
+
+- `pending`
+- `scaned`
+- `completed`
+- `expired`
+- `cancelled`
+
+缺少 `session_id` 时：
+
+```json
+{
+  "ok": false,
+  "error": "session_id is required"
+}
+```
+
+### `POST /login/qr/cancel`
+
+**Request**
+
+```json
+{
+  "session_id": "sess-1"
+}
+```
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "session": {
+    "session_id": "sess-1",
+    "state": "cancelled"
+  }
+}
+```
+
+### `POST /login/qr/complete`
+
+用于手工补录一次登录结果。大多数场景不需要它；通常只在调试或特殊登录流程里使用。
+
+**Request**
+
+```json
+{
+  "session_id": "sess-1",
+  "api_base_url": "https://ilinkai.weixin.qq.com",
+  "bot_token": "token-from-login",
+  "wechat_uin": "user@im.wechat"
+}
+```
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "session": {
+    "session_id": "sess-1",
+    "state": "completed"
+  },
+  "account": {
+    "account_id": "wx-account-1",
+    "api_base_url": "https://ilinkai.weixin.qq.com",
+    "wechat_uin": "user@im.wechat",
+    "cursor": ""
+  }
+}
+```
+
+### `GET /poll/status`
+
+**Request**
+
+- 无请求体
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "polling": {
+    "running": true,
+    "interval_ms": 5000,
+    "last_started_at": "2026-03-24T00:00:00.000Z",
+    "last_finished_at": "2026-03-24T00:00:01.000Z",
+    "last_error": "",
+    "last_results": []
+  }
+}
+```
+
+### `POST /poll/start`
+
+**Request**
+
+- 空 JSON 或无请求体均可
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "polling": {
+    "running": true,
+    "interval_ms": 5000
+  }
+}
+```
+
+### `POST /poll/stop`
+
+**Request**
+
+- 空 JSON 或无请求体均可
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "polling": {
+    "running": false,
+    "interval_ms": 5000
+  }
+}
+```
+
+### `POST /poll/run-once`
+
+**Request**
+
+- 空 JSON 或无请求体均可
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "results": [
+    {
+      "account_id": "wx-account-1",
+      "forwarded": 1,
+      "cursor": "next-cursor"
+    }
+  ]
+}
+```
+
+### `POST /accounts/:account_id/poll-once`
+
+**Request**
+
+- 路径参数：`account_id`
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "result": {
+    "account_id": "wx-account-1",
+    "forwarded": 1,
+    "cursor": "next-cursor"
+  }
+}
+```
+
+找不到账号时：
+
+```json
+{
+  "ok": false,
+  "error": "unknown account_id"
+}
+```
+
+### `POST /typing`
+
+**CLI**
+
+```bash
+node src/cli.js typing:send --account-id <account_id> --to-user-id <user_id>
+node src/cli.js typing:cancel --account-id <account_id> --to-user-id <user_id>
+```
+
+**API**
+
+**Request**
+
+```json
+{
+  "account_id": "wx-account-1",
+  "to_user_id": "wx-user-1",
+  "context_token": "ctx-123",
+  "status": "typing"
+}
+```
+
+`status` 支持：
+
+- `typing`
+- `cancel`
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "typing": {
+    "account_id": "wx-account-1",
+    "to_user_id": "wx-user-1",
+    "status": "typing"
+  }
+}
+```
+
+### `POST /send`
+
+支持：
+
+- 文本
+- 图片
+- 视频
+- 语音
+- 文件
+
+**Request**
+
+```json
+{
+  "account_id": "wx-account-1",
+  "to_user_id": "wx-user-1",
+  "context_token": "ctx-123",
+  "chat_type": "c2c",
+  "items": []
+}
+```
+
+顶层字段：
+
+- `account_id: string`
+  - 用哪个微信 Bot 账号发送
+- `to_user_id: string`
+  - 发给哪个微信用户
+- `context_token: string`
+  - 建议从入站事件原样带回
+- `chat_type: string`
+  - 当前建议固定为 `c2c`
+- `items: array`
+  - 实际要发送的消息内容
+
+`items` 目前支持两类：
+
+### `items[].type = "text"`
+
+```json
+{
+  "type": "text",
+  "text": "你好"
+}
+```
+
+字段：
+
+- `type: "text"`
+- `text: string`
+
+### `items[].type = "file"`
+
+```json
+{
+  "type": "file",
+  "file_type": 1,
+  "url": "https://example.com/image.png"
+}
+```
+
+字段：
+
+- `type: "file"`
+- `file_type: number`
+- `url: string`
+
+`url` 支持：
+
+- `https://...`
+- `http://...`
+- `file:///absolute/path/to/file`
+- `/absolute/path/to/file`
+
+文本示例：
 
 ```json
 {
@@ -174,7 +1137,7 @@
 }
 ```
 
-发送图片/文件时，`items` 结构示例：
+文件或媒体示例：
 
 ```json
 {
@@ -193,13 +1156,51 @@
 }
 ```
 
-说明：
+`file_type` 约定：
 
-- gateway 会先下载这个公网 URL
-- 然后上传到微信 CDN
-- 再调用 `sendmessage` 发送图片/文件消息
+- `1` 图片
+- `2` 视频
+- `3` 语音
+- `4` 文件
 
-Gateway 内部会把拉到的文本消息转换成如下事件并转发给上游：
+语音当前支持的上传格式：
+
+- `.mp3`
+- `.silk`
+- `.amr`
+- `.ogg`
+
+**Response**
+
+成功时：
+
+```json
+{
+  "ok": true
+}
+```
+
+发送失败时：
+
+```json
+{
+  "ok": false,
+  "error": "..."
+}
+```
+
+常见失败原因：
+
+- `unknown account: ...`
+- `missing file item`
+- `unsupported file_type: ...`
+- `unsupported voice format: ...`
+
+## 上游事件
+
+Gateway 会把入站微信消息转成统一事件并转发给你的上游服务。
+
+### Request schema
 
 ```json
 {
@@ -215,76 +1216,73 @@ Gateway 内部会把拉到的文本消息转换成如下事件并转发给上游
 }
 ```
 
-当前入站媒体已支持落盘：
+顶层字段：
 
-- 图片
-- 视频
-- 语音
-- 通用文件
+- `type: string`
+  - 当前固定为 `message`
+- `account_id: string`
+  - 当前使用的微信 Bot 账号
+- `event_id: string`
+  - 当前消息事件 ID，可用于幂等和去重
+- `chat_id: string`
+  - 当前会话 ID
+- `user_id: string`
+  - 当前微信用户 ID
+- `text: string`
+  - gateway 整理后的文本内容
+- `context_token: string`
+  - 回复时建议原样带回
+- `chat_type: string`
+  - 当前固定为 `c2c`
+- `attachments: array`
+  - 可选，存在附件时会出现
+- `raw: object`
+  - 原始微信消息对象
 
-默认会保存到：
+### `attachments[]` schema
+
+当微信消息里带附件时，gateway 会把附件下载到本地，再在事件里附带 `attachments`。
+
+示例：
+
+```json
+{
+  "attachments": [
+    {
+      "kind": "image",
+      "path": "/Users/you/weixin-gateway/.data/inbound/weixin-inbound-1.png",
+      "filename": "weixin-inbound-1.png",
+      "mime_type": "image/png"
+    }
+  ]
+}
+```
+
+字段说明：
+
+- `kind: string`
+  - 附件类型
+  - 当前可能值：
+    - `image`
+    - `video`
+    - `voice`
+    - `file`
+- `path: string`
+  - gateway 本地落盘后的绝对路径
+- `filename: string`
+  - 保存后的文件名
+- `mime_type: string`
+  - 推断得到的 MIME 类型
+
+当前入站附件会落盘到：
 
 - `WEIXIN_GATEWAY_DATA_DIR/inbound`
-- 默认即 `apps/weixin-gateway/.data/inbound`
 
-## 开发建议
+默认路径：
 
-当前目录结构：
+- `apps/weixin-gateway/.data/inbound`
 
-- `src/auth/login-qr.js`：二维码登录会话管理
-- `src/config.js`：环境配置
-- `src/store/file-store.js`：本地账号与游标存储
-- `src/api/weixin-api.js`：`getupdates/sendmessage` HTTP 封装
-- `src/media/send-media.js`：图片/通用文件发送流程
-- `src/cdn/`：CDN 上传相关最小实现
-- `src/bridge/upstream-client.js`：向上游 callback 转发事件
-- `src/bridge/xuanji-client.js`：旧版 Xuanji 命名兼容导出
-- `src/runtime/poller.js`：轮询与出站逻辑
-- `src/server.js`：HTTP 服务入口
-
-## 运行
-
-```bash
-cd apps/weixin-gateway
-node src/server.js
-```
-
-调试 CLI：
-
-```bash
-cd apps/weixin-gateway
-node src/cli.js health
-node src/cli.js login:start
-node src/cli.js login:status --session-id <session_id>
-node src/cli.js login:watch --session-id <session_id>
-node src/cli.js accounts:show --account-id <account_id>
-node src/cli.js accounts:remove --account-id <account_id>
-node src/cli.js poll:status
-node src/cli.js poll:start
-node src/cli.js accounts
-```
-
-拆分成独立仓库时，也可以直接使用导出脚本：
-
-```bash
-cd apps/weixin-gateway
-bash scripts/export-standalone.sh ~/Codes/xuanji-weixin-gateway
-```
-
-也可以：
-
-```bash
-pnpm cli -- health
-pnpm cli -- login:start
-```
-
-`login:start` 默认会使用：
-
-- `https://ilinkai.weixin.qq.com`
-
-如果你后面需要切换上游地址，再显式传 `--api-base-url`。
-
-环境变量：
+## 环境变量
 
 ```bash
 PORT=8787
@@ -298,37 +1296,37 @@ WEIXIN_GATEWAY_LOGIN_SESSION_TTL_MS=600000
 WEIXIN_GATEWAY_VERBOSE_UPDATES=false
 ```
 
-默认行为：
-
-- 服务启动后，如果本地已经有账号，默认会自动开始轮询
-- 二维码登录成功后，也会自动开始轮询
-- `poll:start / poll:stop` 仍然保留给调试和运维场景
-
 兼容说明：
 
-- 当前仍兼容旧的 `XUANJI_BASE_URL` / `XUANJI_WEIXIN_CALLBACK_PATH` / `XUANJI_SHARED_SECRET`
-- 如果同时设置了新旧两套变量，优先使用 `UPSTREAM_*`
+- 仍兼容旧的 `XUANJI_BASE_URL`
+- 仍兼容旧的 `XUANJI_WEIXIN_CALLBACK_PATH`
+- 仍兼容旧的 `XUANJI_SHARED_SECRET`
+- 如果新旧同时存在，优先使用 `UPSTREAM_*`
 
-## 已验证的发送要点
+## 常见操作
 
-当前文本回复链路已经验证通过，但有一个很重要的协议细节：
+### 导出成独立仓库
 
-- `sendmessage` 不能只发送最简的 `to_user_id/context_token/item_list`
+```bash
+cd apps/weixin-gateway
+bash scripts/export-standalone.sh ~/Codes/xuanji-weixin-gateway
+```
 
-当前验证过可稳定工作的文本消息结构还需要包含：
+### 用 pnpm 调 CLI
 
-- `from_user_id: ""`
-- `client_id`
-- `message_type: 2`
-- `message_state: 2`
+```bash
+pnpm cli -- health
+pnpm cli -- login:start
+```
 
-如果缺少这些字段，可能会出现：
+## 当前建议
 
-- 上游 HTTP 返回成功
-- gateway 也认为发送成功
-- 但微信端实际收不到回复
+如果你是第一次接入，最顺的路径是：
 
-另外，正常轮询日志默认已经降噪：
-
-- `getUpdates` 的正常 request/response 默认不打印
-- 如需排查轮询问题，可临时设置 `WEIXIN_GATEWAY_VERBOSE_UPDATES=true`
+1. 启动 `node src/server.js`
+2. 执行 `node src/cli.js login:start`
+3. 扫码后执行 `node src/cli.js login:watch --session-id <session_id>`
+4. 用 `node src/cli.js accounts` 确认账号已登录
+5. 用 `node src/cli.js poll:status` 确认轮询在运行
+6. 配置 `UPSTREAM_BASE_URL` 和 `UPSTREAM_EVENTS_PATH`
+7. 开始用 `/send` 和上游事件回调接入你的 Agent

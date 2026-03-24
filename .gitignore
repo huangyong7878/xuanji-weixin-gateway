@@ -2,3 +2,6 @@
 *.tgz
 package/
 .DS_Store
+examples/**/.venv/
+examples/**/__pycache__/
+examples/**/*.pyc
