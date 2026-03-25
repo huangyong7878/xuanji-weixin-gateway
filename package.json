@@ -38,7 +38,7 @@
     "CONTRIBUTING.md"
   ],
   "scripts": {
-    "test": "node --test src/config.test.js src/auth/login-qr.test.js src/cli.test.js src/api/weixin-api.test.js src/runtime/poller.test.js src/media/send-media.test.js src/media/inbound-media.test.js src/store/file-store.test.js",
+    "test": "node --test src/config.test.js src/auth/login-qr.test.js src/cli.test.js src/api/weixin-api.test.js src/cdn/cdn-upload.test.js src/runtime/poller.test.js src/media/send-media.test.js src/media/inbound-media.test.js src/store/file-store.test.js",
     "cli": "node src/cli.js",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js"
