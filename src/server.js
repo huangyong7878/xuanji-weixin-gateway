@@ -1,6 +1,8 @@
 import http from 'node:http'
+import fs from 'node:fs'
 import process from 'node:process'
 import { URL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 import { loadConfig } from './config.js'
 import { cancelQrLogin, completeQrLogin, getQrLoginStatus, startQrLogin } from './auth/login-qr.js'
@@ -528,6 +530,20 @@ export async function startServer() {
   return server
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+function isMainModule() {
+  const argvPath = process.argv[1]
+  if (!argvPath) {
+    return false
+  }
+  try {
+    const currentFile = fs.realpathSync(fileURLToPath(import.meta.url))
+    const invokedFile = fs.realpathSync(argvPath)
+    return currentFile === invokedFile
+  } catch {
+    return false
+  }
+}
+
+if (isMainModule()) {
   await startServer()
 }

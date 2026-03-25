@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 
 import { createGatewayClient } from './client/gateway-client.js'
 
@@ -11,6 +13,20 @@ export function isStartCommand(command, flags = {}) {
   return !command || command === 'start' || command === 'serve' || command === 'server'
     ? !Boolean(flags.help)
     : false
+}
+
+function isMainModule() {
+  const argvPath = process.argv[1]
+  if (!argvPath) {
+    return false
+  }
+  try {
+    const currentFile = fs.realpathSync(fileURLToPath(import.meta.url))
+    const invokedFile = fs.realpathSync(argvPath)
+    return currentFile === invokedFile
+  } catch {
+    return false
+  }
 }
 
 function printUsage(io = console) {
@@ -326,7 +342,7 @@ export async function runCli(argv, io = console) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule()) {
   const parsed = parseArgs(process.argv.slice(2))
   const code = await runCli(process.argv.slice(2))
   if (!isStartCommand(parsed.command, parsed.flags)) {
