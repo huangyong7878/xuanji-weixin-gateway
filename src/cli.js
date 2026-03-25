@@ -7,25 +7,40 @@ import { createGatewayClient } from './client/gateway-client.js'
 const DEFAULT_GATEWAY_BASE_URL = 'http://127.0.0.1:8787'
 const DEFAULT_ILINK_API_BASE_URL = 'https://ilinkai.weixin.qq.com'
 
+export function isStartCommand(command, flags = {}) {
+  return !command || command === 'start' || command === 'serve' || command === 'server'
+    ? !Boolean(flags.help)
+    : false
+}
+
 function printUsage(io = console) {
   io.log(`weixin-gateway CLI
 
 用法:
-  node src/cli.js health
-  node src/cli.js accounts
-  node src/cli.js accounts:show --account-id ACCOUNT_ID
-  node src/cli.js accounts:remove --account-id ACCOUNT_ID
-  node src/cli.js login:start [--api-base-url URL] [--account-id ID] [--bot-type 3]
-  node src/cli.js login:status --session-id SESSION_ID
-  node src/cli.js login:watch --session-id SESSION_ID [--interval-ms 1500] [--timeout-ms 180000]
-  node src/cli.js login:cancel --session-id SESSION_ID
-  node src/cli.js poll:status
-  node src/cli.js poll:start
-  node src/cli.js poll:stop
-  node src/cli.js poll:once
-  node src/cli.js poll:account --account-id ACCOUNT_ID
-  node src/cli.js typing:send --account-id ACCOUNT_ID --to-user-id USER_ID [--context-token TOKEN]
-  node src/cli.js typing:cancel --account-id ACCOUNT_ID --to-user-id USER_ID [--context-token TOKEN]
+  weixin-gateway                  启动服务
+  weixin-gateway start            启动服务
+  weixin-gateway serve            启动服务
+  weixin-gateway health
+  weixin-gateway accounts
+  weixin-gateway accounts:show --account-id ACCOUNT_ID
+  weixin-gateway accounts:remove --account-id ACCOUNT_ID
+  weixin-gateway inbox:list [--status pending] [--limit 20] [--account-id ACCOUNT_ID]
+  weixin-gateway inbox:show --message-id MESSAGE_ID
+  weixin-gateway inbox:claim --message-id MESSAGE_ID [--worker-id codex]
+  weixin-gateway inbox:complete --message-id MESSAGE_ID [--completion-note NOTE]
+  weixin-gateway inbox:fail --message-id MESSAGE_ID --error MESSAGE
+  weixin-gateway login:start [--api-base-url URL] [--account-id ID] [--bot-type 3]
+  weixin-gateway login:status --session-id SESSION_ID
+  weixin-gateway login:watch --session-id SESSION_ID [--interval-ms 1500] [--timeout-ms 180000]
+  weixin-gateway login:cancel --session-id SESSION_ID
+  weixin-gateway poll:status
+  weixin-gateway poll:start
+  weixin-gateway poll:stop
+  weixin-gateway poll:once
+  weixin-gateway poll:account --account-id ACCOUNT_ID
+  weixin-gateway typing:send --account-id ACCOUNT_ID --to-user-id USER_ID [--context-token TOKEN]
+  weixin-gateway typing:cancel --account-id ACCOUNT_ID --to-user-id USER_ID [--context-token TOKEN]
+  weixin-gateway help
 
 可选:
   --gateway-base-url URL   默认 http://127.0.0.1:8787
@@ -98,7 +113,7 @@ function printResult(command, data, io = console, jsonMode = false) {
       }
       for (const account of data.accounts) {
         io.log(
-          `${account.account_id}  ${account.api_base_url}  cursor=${account.cursor || ''}  running=${Boolean(account.status?.polling_running)}  last_error=${account.status?.last_error || ''}`,
+          `${account.account_id}  ${account.api_base_url}  state=${account.status?.session_state || 'active'}  cursor=${account.cursor || ''}  running=${Boolean(account.status?.polling_running)}  last_error=${account.status?.last_error || ''}`,
         )
       }
       return
@@ -106,6 +121,7 @@ function printResult(command, data, io = console, jsonMode = false) {
       io.log(`account_id=${data.account?.account_id || ''}`)
       io.log(`api_base_url=${data.account?.api_base_url || ''}`)
       io.log(`wechat_uin=${data.account?.wechat_uin || ''}`)
+      io.log(`session_state=${data.account?.status?.session_state || 'active'}`)
       io.log(`cursor=${data.account?.cursor || ''}`)
       io.log(`polling=${Boolean(data.account?.status?.polling_running)}`)
       io.log(`last_forwarded=${data.account?.status?.last_forwarded ?? 0}`)
@@ -114,6 +130,34 @@ function printResult(command, data, io = console, jsonMode = false) {
     case 'accounts:remove':
       io.log(`removed=${data.removed?.account_id || ''}`)
       io.log(`polling=${Boolean(data.polling?.running)}`)
+      return
+    case 'inbox:list':
+      if (!Array.isArray(data.messages) || data.messages.length === 0) {
+        io.log('没有符合条件的消息。')
+        return
+      }
+      for (const message of data.messages) {
+        io.log(
+          `${message.id}  ${message.status}  account=${message.account_id}  user=${message.user_id}  text=${JSON.stringify(String(message.text || '').slice(0, 60))}`,
+        )
+      }
+      return
+    case 'inbox:show':
+    case 'inbox:claim':
+    case 'inbox:complete':
+    case 'inbox:fail':
+      io.log(`message_id=${data.message?.id || ''}`)
+      io.log(`status=${data.message?.status || ''}`)
+      io.log(`account_id=${data.message?.account_id || ''}`)
+      io.log(`user_id=${data.message?.user_id || ''}`)
+      io.log(`context_token=${data.message?.context_token || ''}`)
+      io.log(`text=${data.message?.text || ''}`)
+      if (data.message?.error) {
+        io.log(`error=${data.message.error}`)
+      }
+      if (data.message?.claim?.worker_id) {
+        io.log(`worker_id=${data.message.claim.worker_id}`)
+      }
       return
     case 'login:start':
       io.log(`session_id=${data.session?.session_id || ''}`)
@@ -164,8 +208,13 @@ function printResult(command, data, io = console, jsonMode = false) {
 
 export async function runCli(argv, io = console) {
   const { command, flags } = parseArgs(argv)
-  if (!command || flags.help) {
+  if (command === 'help' || flags.help) {
     printUsage(io)
+    return 0
+  }
+  if (isStartCommand(command, flags)) {
+    const { startServer } = await import('./server.js')
+    await startServer()
     return 0
   }
 
@@ -186,6 +235,25 @@ export async function runCli(argv, io = console) {
         break
       case 'accounts:remove':
         result = await client.removeAccount(requireFlag(flags, 'account-id'))
+        break
+      case 'inbox:list':
+        result = await client.listInboxMessages({
+          status: getFlag(flags, 'status', 'pending'),
+          limit: Number(getFlag(flags, 'limit', '20')) || 20,
+          account_id: getFlag(flags, 'account-id'),
+        })
+        break
+      case 'inbox:show':
+        result = await client.getInboxMessage(requireFlag(flags, 'message-id'))
+        break
+      case 'inbox:claim':
+        result = await client.claimInboxMessage(requireFlag(flags, 'message-id'), getFlag(flags, 'worker-id', 'codex'))
+        break
+      case 'inbox:complete':
+        result = await client.completeInboxMessage(requireFlag(flags, 'message-id'), getFlag(flags, 'completion-note'))
+        break
+      case 'inbox:fail':
+        result = await client.failInboxMessage(requireFlag(flags, 'message-id'), requireFlag(flags, 'error'))
         break
       case 'login:start':
         result = await client.startQrLogin({
@@ -259,6 +327,9 @@ export async function runCli(argv, io = console) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  const parsed = parseArgs(process.argv.slice(2))
   const code = await runCli(process.argv.slice(2))
-  process.exit(code)
+  if (!isStartCommand(parsed.command, parsed.flags)) {
+    process.exit(code)
+  }
 }

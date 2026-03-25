@@ -35,7 +35,7 @@ test('downloadInboundAttachments saves decrypted inbound image', async () => {
       },
     ],
   }, {
-    dataDir: tempDir,
+    inboundDir: tempDir,
     account: {},
   })
   global.fetch = originalFetch
@@ -77,7 +77,7 @@ test('downloadInboundAttachments saves decrypted inbound file with original exte
       },
     ],
   }, {
-    dataDir: tempDir,
+    inboundDir: tempDir,
     account: {},
   })
   global.fetch = originalFetch
@@ -121,7 +121,7 @@ test('downloadInboundAttachments saves decrypted inbound video', async () => {
       },
     ],
   }, {
-    dataDir: tempDir,
+    inboundDir: tempDir,
     account: {},
   })
   global.fetch = originalFetch
@@ -165,7 +165,7 @@ test('downloadInboundAttachments saves decrypted inbound voice as raw silk when 
       },
     ],
   }, {
-    dataDir: tempDir,
+    inboundDir: tempDir,
     account: {},
   })
   global.fetch = originalFetch

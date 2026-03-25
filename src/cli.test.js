@@ -1,7 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { runCli } from './cli.js'
+import { isStartCommand, runCli } from './cli.js'
+
+test('isStartCommand treats empty and start aliases as server startup', () => {
+  assert.equal(isStartCommand('', {}), true)
+  assert.equal(isStartCommand('start', {}), true)
+  assert.equal(isStartCommand('serve', {}), true)
+  assert.equal(isStartCommand('server', {}), true)
+  assert.equal(isStartCommand('health', {}), false)
+  assert.equal(isStartCommand('', { help: true }), false)
+})
 
 test('runCli prints login:start summary', async () => {
   const calls = []
@@ -240,6 +249,80 @@ test('runCli accounts:remove prints removed account summary', async () => {
   assert.equal(code, 0)
   assert.ok(lines.some((line) => line.includes('removed=bot-1')))
   assert.ok(lines.some((line) => line.includes('polling=false')))
+})
+
+test('runCli inbox:list prints message summary', async () => {
+  const originalFetch = global.fetch
+  global.fetch = async () => ({
+    ok: true,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        messages: [
+          {
+            id: 'msg-1',
+            status: 'pending',
+            account_id: 'bot-1',
+            user_id: 'wx-user-1',
+            text: '请帮我看一下仓库状态',
+          },
+        ],
+      })
+    },
+  })
+
+  const lines = []
+  const code = await runCli(['inbox:list', '--status', 'pending', '--limit', '5'], {
+    log: (...args) => lines.push(args.join(' ')),
+    error: (...args) => lines.push(`ERR:${args.join(' ')}`),
+  })
+
+  global.fetch = originalFetch
+
+  assert.equal(code, 0)
+  assert.ok(lines.some((line) => line.includes('msg-1')))
+  assert.ok(lines.some((line) => line.includes('pending')))
+})
+
+test('runCli inbox:claim posts worker_id and prints claim summary', async () => {
+  const calls = []
+  const originalFetch = global.fetch
+  global.fetch = async (url, init) => {
+    calls.push({ url, init })
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify({
+          ok: true,
+          message: {
+            id: 'msg-1',
+            status: 'claimed',
+            account_id: 'bot-1',
+            user_id: 'wx-user-1',
+            text: '帮我查一下 issue',
+            claim: {
+              worker_id: 'codex',
+            },
+          },
+        })
+      },
+    }
+  }
+
+  const lines = []
+  const code = await runCli(['inbox:claim', '--message-id', 'msg-1', '--worker-id', 'codex'], {
+    log: (...args) => lines.push(args.join(' ')),
+    error: (...args) => lines.push(`ERR:${args.join(' ')}`),
+  })
+
+  global.fetch = originalFetch
+
+  assert.equal(code, 0)
+  assert.match(String(calls[0].url), /\/inbox\/messages\/msg-1\/claim$/)
+  const body = JSON.parse(String(calls[0].init.body))
+  assert.equal(body.worker_id, 'codex')
+  assert.ok(lines.some((line) => line.includes('status=claimed')))
+  assert.ok(lines.some((line) => line.includes('worker_id=codex')))
 })
 
 test('runCli typing:send posts typing payload and prints summary', async () => {

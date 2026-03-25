@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import crypto from 'node:crypto'
 
 const STATE_FILE = 'state.json'
 
@@ -25,16 +26,17 @@ export class FileStore {
   async init() {
     await ensureDir(this.dataDir)
     const state = await this.loadState()
-    if (!state.accounts || !state.login_sessions) {
+    if (!state.accounts || !state.login_sessions || !state.inbox_messages) {
       await this.saveState({
         accounts: state.accounts || {},
         login_sessions: state.login_sessions || {},
+        inbox_messages: state.inbox_messages || {},
       })
     }
   }
 
   async loadState() {
-    return await readJson(this.statePath, { accounts: {}, login_sessions: {} })
+    return await readJson(this.statePath, { accounts: {}, login_sessions: {}, inbox_messages: {} })
   }
 
   async saveState(state) {
@@ -109,6 +111,21 @@ export class FileStore {
     return existing
   }
 
+  async updateAccount(accountId, patch) {
+    const state = await this.loadState()
+    const existing = state.accounts?.[accountId]
+    if (!existing) {
+      return null
+    }
+    state.accounts[accountId] = {
+      ...existing,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    }
+    await this.saveState(state)
+    return state.accounts[accountId]
+  }
+
   async createLoginSession(session) {
     const state = await this.loadState()
     state.login_sessions ||= {}
@@ -145,5 +162,108 @@ export class FileStore {
     delete state.login_sessions[sessionId]
     await this.saveState(state)
     return existing
+  }
+
+  async enqueueInboxMessage(message) {
+    const state = await this.loadState()
+    state.inbox_messages ||= {}
+    const eventId = String(message.event_id || '').trim()
+    const accountId = String(message.account_id || '').trim()
+    const dedupeKey = eventId && accountId ? `${accountId}:${eventId}` : ''
+    if (dedupeKey) {
+      const existing = Object.values(state.inbox_messages).find((item) => item?.dedupe_key === dedupeKey) || null
+      if (existing) {
+        return existing
+      }
+    }
+    const messageId = crypto.randomUUID()
+    const now = new Date().toISOString()
+    const record = {
+      id: messageId,
+      dedupe_key: dedupeKey,
+      status: 'pending',
+      claim: null,
+      error: '',
+      callback_attempted: false,
+      callback_succeeded: false,
+      created_at: now,
+      updated_at: now,
+      ...message,
+    }
+    state.inbox_messages[messageId] = record
+    await this.saveState(state)
+    return record
+  }
+
+  async listInboxMessages(options = {}) {
+    const state = await this.loadState()
+    const status = String(options.status || '').trim()
+    const limit = Number(options.limit || 20)
+    const accountId = String(options.account_id || '').trim()
+    const items = Object.values(state.inbox_messages || {})
+      .filter((item) => {
+        if (status && String(item?.status || '') !== status) {
+          return false
+        }
+        if (accountId && String(item?.account_id || '') !== accountId) {
+          return false
+        }
+        return true
+      })
+      .sort((left, right) => String(left.created_at || '').localeCompare(String(right.created_at || '')))
+    return items.slice(0, Math.max(1, limit))
+  }
+
+  async getInboxMessage(messageId) {
+    const state = await this.loadState()
+    return state.inbox_messages?.[messageId] || null
+  }
+
+  async updateInboxMessage(messageId, patch) {
+    const state = await this.loadState()
+    if (!state.inbox_messages?.[messageId]) {
+      return null
+    }
+    state.inbox_messages[messageId] = {
+      ...state.inbox_messages[messageId],
+      ...patch,
+      updated_at: new Date().toISOString(),
+    }
+    await this.saveState(state)
+    return state.inbox_messages[messageId]
+  }
+
+  async claimInboxMessage(messageId, workerId = '') {
+    const current = await this.getInboxMessage(messageId)
+    if (!current) {
+      return null
+    }
+    if (current.status !== 'pending' && current.status !== 'failed') {
+      return current
+    }
+    return await this.updateInboxMessage(messageId, {
+      status: 'claimed',
+      claim: {
+        worker_id: workerId || '',
+        claimed_at: new Date().toISOString(),
+      },
+      error: '',
+    })
+  }
+
+  async completeInboxMessage(messageId, patch = {}) {
+    return await this.updateInboxMessage(messageId, {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      ...patch,
+    })
+  }
+
+  async failInboxMessage(messageId, error = '') {
+    return await this.updateInboxMessage(messageId, {
+      status: 'failed',
+      error: String(error || ''),
+      failed_at: new Date().toISOString(),
+    })
   }
 }

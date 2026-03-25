@@ -1,4 +1,5 @@
 import http from 'node:http'
+import process from 'node:process'
 import { URL } from 'node:url'
 
 import { loadConfig } from './config.js'
@@ -8,11 +9,14 @@ import { FileStore } from './store/file-store.js'
 import { pollAccountOnce, pollAllAccountsOnce, sendOutboundMessage } from './runtime/poller.js'
 import { PollingLoop } from './runtime/loop.js'
 
-const config = loadConfig()
-const store = new FileStore(config.dataDir)
-const pollingLoop = new PollingLoop(config, store)
+function createAppContext() {
+  const config = loadConfig()
+  const store = new FileStore(config.dataDir)
+  const pollingLoop = new PollingLoop(config, store)
+  return { config, store, pollingLoop }
+}
 
-async function maybeAutoStartPolling() {
+async function maybeAutoStartPolling(config, pollingLoop) {
   if (!config.autoStartPolling) {
     return false
   }
@@ -26,6 +30,7 @@ function buildAccountStatus(account) {
     : null
   return {
     polling_running: polling.running,
+    session_state: String(account.session_state || lastResult?.session_state || 'active'),
     has_cursor: Boolean(account.cursor),
     last_forwarded: Number(lastResult?.forwarded || 0),
     last_error: String(lastResult?.error || ''),
@@ -43,6 +48,30 @@ function buildAccountView(account) {
     created_at: account.created_at || '',
     updated_at: account.updated_at || '',
     status: buildAccountStatus(account),
+  }
+}
+
+function buildInboxView(message) {
+  return {
+    id: message.id,
+    type: message.type || 'message',
+    status: message.status || 'pending',
+    account_id: message.account_id || '',
+    event_id: message.event_id || '',
+    chat_id: message.chat_id || '',
+    user_id: message.user_id || '',
+    chat_type: message.chat_type || 'c2c',
+    text: message.text || '',
+    context_token: message.context_token || '',
+    attachments: Array.isArray(message.attachments) ? message.attachments : [],
+    callback_attempted: Boolean(message.callback_attempted),
+    callback_succeeded: Boolean(message.callback_succeeded),
+    claim: message.claim || null,
+    error: message.error || '',
+    created_at: message.created_at || '',
+    updated_at: message.updated_at || '',
+    completed_at: message.completed_at || '',
+    failed_at: message.failed_at || '',
   }
 }
 
@@ -76,7 +105,7 @@ function readJson(req) {
   })
 }
 
-async function handleRequest(req, res) {
+async function handleRequest(req, res, config, store, pollingLoop) {
   const method = req.method || 'GET'
   const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`)
 
@@ -86,6 +115,7 @@ async function handleRequest(req, res) {
       service: 'weixin-gateway',
       phase: 'text-mvp',
       polling: pollingLoop.status,
+      delivery_mode: config.deliveryMode,
     })
     return
   }
@@ -94,6 +124,23 @@ async function handleRequest(req, res) {
     sendJson(res, 200, {
       ok: true,
       polling: pollingLoop.status,
+      delivery_mode: config.deliveryMode,
+    })
+    return
+  }
+
+  if (method === 'GET' && url.pathname === '/inbox/messages') {
+    const status = String(url.searchParams.get('status') || 'pending').trim()
+    const limit = Number(url.searchParams.get('limit') || 20)
+    const accountId = String(url.searchParams.get('account_id') || '').trim()
+    const messages = await store.listInboxMessages({
+      status,
+      limit,
+      account_id: accountId,
+    })
+    sendJson(res, 200, {
+      ok: true,
+      messages: messages.map((message) => buildInboxView(message)),
     })
     return
   }
@@ -127,6 +174,26 @@ async function handleRequest(req, res) {
     }
   }
 
+  if (method === 'GET' && url.pathname.startsWith('/inbox/messages/')) {
+    const parts = url.pathname.split('/')
+    const messageId = decodeURIComponent(parts[3] || '')
+    if (parts.length === 4 && messageId) {
+      const message = await store.getInboxMessage(messageId)
+      if (!message) {
+        sendJson(res, 404, {
+          ok: false,
+          error: 'unknown message_id',
+        })
+        return
+      }
+      sendJson(res, 200, {
+        ok: true,
+        message: buildInboxView(message),
+      })
+      return
+    }
+  }
+
   if (method === 'POST' && url.pathname === '/login/qr/start') {
     const body = await readJson(req)
     const session = await startQrLogin(config, store, body)
@@ -155,7 +222,7 @@ async function handleRequest(req, res) {
       return
     }
     if (session?.state === 'completed') {
-      await maybeAutoStartPolling()
+      await maybeAutoStartPolling(config, pollingLoop)
     }
     sendJson(res, 200, {
       ok: true,
@@ -167,7 +234,7 @@ async function handleRequest(req, res) {
   if (method === 'POST' && url.pathname === '/login/qr/complete') {
     const body = await readJson(req)
     const result = await completeQrLogin(store, body)
-    await maybeAutoStartPolling()
+    await maybeAutoStartPolling(config, pollingLoop)
     sendJson(res, 200, {
       ok: true,
       session: result.session,
@@ -228,7 +295,7 @@ async function handleRequest(req, res) {
       cursor: '',
       created_at: new Date().toISOString(),
     })
-    await maybeAutoStartPolling()
+    await maybeAutoStartPolling(config, pollingLoop)
     sendJson(res, 200, {
       ok: true,
       account: buildAccountView(account),
@@ -289,6 +356,66 @@ async function handleRequest(req, res) {
     return
   }
 
+  if (method === 'POST' && url.pathname.startsWith('/inbox/messages/') && url.pathname.endsWith('/claim')) {
+    const parts = url.pathname.split('/')
+    const messageId = decodeURIComponent(parts[3] || '')
+    const body = await readJson(req)
+    const workerId = String(body.worker_id || '').trim()
+    const message = await store.claimInboxMessage(messageId, workerId)
+    if (!message) {
+      sendJson(res, 404, {
+        ok: false,
+        error: 'unknown message_id',
+      })
+      return
+    }
+    sendJson(res, 200, {
+      ok: true,
+      message: buildInboxView(message),
+    })
+    return
+  }
+
+  if (method === 'POST' && url.pathname.startsWith('/inbox/messages/') && url.pathname.endsWith('/complete')) {
+    const parts = url.pathname.split('/')
+    const messageId = decodeURIComponent(parts[3] || '')
+    const body = await readJson(req)
+    const message = await store.completeInboxMessage(messageId, {
+      completion_note: String(body.completion_note || '').trim(),
+    })
+    if (!message) {
+      sendJson(res, 404, {
+        ok: false,
+        error: 'unknown message_id',
+      })
+      return
+    }
+    sendJson(res, 200, {
+      ok: true,
+      message: buildInboxView(message),
+    })
+    return
+  }
+
+  if (method === 'POST' && url.pathname.startsWith('/inbox/messages/') && url.pathname.endsWith('/fail')) {
+    const parts = url.pathname.split('/')
+    const messageId = decodeURIComponent(parts[3] || '')
+    const body = await readJson(req)
+    const message = await store.failInboxMessage(messageId, String(body.error || '').trim())
+    if (!message) {
+      sendJson(res, 404, {
+        ok: false,
+        error: 'unknown message_id',
+      })
+      return
+    }
+    sendJson(res, 200, {
+      ok: true,
+      message: buildInboxView(message),
+    })
+    return
+  }
+
   if (method === 'DELETE' && url.pathname.startsWith('/accounts/')) {
     const parts = url.pathname.split('/')
     const accountId = decodeURIComponent(parts[2] || '')
@@ -319,6 +446,7 @@ async function handleRequest(req, res) {
     sendJson(res, 200, {
       ok: true,
       results: result,
+      delivery_mode: config.deliveryMode,
     })
     return
   }
@@ -378,17 +506,28 @@ async function handleRequest(req, res) {
   })
 }
 
-const server = http.createServer((req, res) => {
-  handleRequest(req, res).catch((error) => {
-    sendJson(res, 500, {
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
+export async function startServer() {
+  const { config, store, pollingLoop } = createAppContext()
+  const server = http.createServer((req, res) => {
+    handleRequest(req, res, config, store, pollingLoop).catch((error) => {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      })
     })
   })
-})
 
-await store.init()
-await maybeAutoStartPolling()
-server.listen(config.port, () => {
-  console.log(`[weixin-gateway] listening on :${config.port}`)
-})
+  await store.init()
+  await maybeAutoStartPolling(config, pollingLoop)
+  await new Promise((resolve) => {
+    server.listen(config.port, () => {
+      console.log(`[weixin-gateway] listening on :${config.port}`)
+      resolve(undefined)
+    })
+  })
+  return server
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  await startServer()
+}

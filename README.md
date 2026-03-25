@@ -61,6 +61,10 @@ weixin-gateway login:start
 - 自动轮询
 - 账号管理
 - API / CLI
+- 两种上游投递模式：
+  - `callback`
+  - `inbox`
+- 失效账号状态标记（`expired`）
 
 ## 最小上游示例
 
@@ -200,6 +204,33 @@ POST /poll/stop
 
 ### 4. 对接你的上游 Agent
 
+从 `v0.2.0` 开始，gateway 支持两种上游投递模式：
+
+- `callback`
+  - 保持原有行为
+  - 微信消息到达后直接回调你的上游 HTTP 服务
+- `inbox`
+  - 不主动回调
+  - 把消息存进 gateway inbox，等待你的 Agent 主动拉取
+
+默认模式仍然是：
+
+- `callback`
+
+账号状态说明：
+
+- `active`
+  - 当前账号仍会参与自动轮询
+- `expired`
+  - 该账号在轮询中出现过 `session timeout`
+  - 记录会保留，但自动轮询会默认跳过它
+
+如果你准备让 Codex 或其他本地 agent 主动轮询处理消息，推荐设置：
+
+```bash
+export WEIXIN_GATEWAY_DELIVERY_MODE=inbox
+```
+
 需要配置上游服务地址：
 
 ```bash
@@ -214,6 +245,8 @@ Gateway 会把入站微信消息转发到：
 例如：
 
 - `http://127.0.0.1:8000/callback/weixin-gateway`
+
+在 `inbox` 模式下，这组 `UPSTREAM_*` 配置不是必需的；消息会保存在 gateway 本地 inbox，等待你的 agent 通过 API 或 CLI 拉取。
 
 你的上游服务需要做两件事：
 
@@ -622,6 +655,10 @@ weixin-gateway login:cancel --session-id <session_id>
 weixin-gateway poll:status
 weixin-gateway poll:start
 weixin-gateway poll:stop
+weixin-gateway inbox:list --status pending
+weixin-gateway inbox:claim --message-id <message_id> --worker-id codex
+weixin-gateway inbox:complete --message-id <message_id>
+weixin-gateway inbox:fail --message-id <message_id> --error "..."
 weixin-gateway typing:send --account-id <account_id> --to-user-id <user_id>
 weixin-gateway typing:cancel --account-id <account_id> --to-user-id <user_id>
 ```
@@ -649,6 +686,7 @@ weixin-gateway typing:cancel --account-id <account_id> --to-user-id <user_id>
   "ok": true,
   "service": "weixin-gateway",
   "phase": "text-mvp",
+  "delivery_mode": "callback",
   "polling": {
     "running": true,
     "interval_ms": 5000
@@ -676,6 +714,7 @@ weixin-gateway typing:cancel --account-id <account_id> --to-user-id <user_id>
       "created_at": "2026-03-24T00:00:00.000Z",
       "updated_at": "2026-03-24T00:00:00.000Z",
       "status": {
+        "session_state": "active",
         "polling_running": true,
         "has_cursor": false,
         "last_forwarded": 0,
@@ -707,6 +746,7 @@ weixin-gateway typing:cancel --account-id <account_id> --to-user-id <user_id>
     "created_at": "2026-03-24T00:00:00.000Z",
     "updated_at": "2026-03-24T00:00:00.000Z",
     "status": {
+      "session_state": "active",
       "polling_running": true,
       "has_cursor": false,
       "last_forwarded": 0,
@@ -794,6 +834,7 @@ weixin-gateway typing:cancel --account-id <account_id> --to-user-id <user_id>
     "created_at": "2026-03-24T00:00:00.000Z",
     "updated_at": "2026-03-24T00:00:00.000Z",
     "status": {
+      "session_state": "active",
       "polling_running": false,
       "has_cursor": false,
       "last_forwarded": 0,
@@ -939,6 +980,7 @@ weixin-gateway typing:cancel --account-id <account_id> --to-user-id <user_id>
 ```json
 {
   "ok": true,
+  "delivery_mode": "callback",
   "polling": {
     "running": true,
     "interval_ms": 5000,
@@ -997,6 +1039,7 @@ weixin-gateway typing:cancel --account-id <account_id> --to-user-id <user_id>
 ```json
 {
   "ok": true,
+  "delivery_mode": "callback",
   "results": [
     {
       "account_id": "wx-account-1",
@@ -1004,6 +1047,168 @@ weixin-gateway typing:cancel --account-id <account_id> --to-user-id <user_id>
       "cursor": "next-cursor"
     }
   ]
+}
+```
+
+### `GET /inbox/messages`
+
+用于拉取 gateway 已暂存的入站消息。适合本地 agent、Codex automation 或任何不想开 webhook server 的上游。
+
+**CLI**
+
+```bash
+weixin-gateway inbox:list --status pending --limit 10
+```
+
+**Request**
+
+- 查询参数：
+  - `status`，默认 `pending`
+  - `limit`，默认 `20`
+  - `account_id`，可选
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "messages": [
+    {
+      "id": "msg-1",
+      "type": "message",
+      "status": "pending",
+      "account_id": "wx-account-1",
+      "event_id": "evt-1",
+      "chat_id": "wx-user-1",
+      "user_id": "wx-user-1",
+      "chat_type": "c2c",
+      "text": "帮我看一下仓库状态",
+      "context_token": "ctx-1",
+      "attachments": [],
+      "callback_attempted": false,
+      "callback_succeeded": false,
+      "claim": null,
+      "error": "",
+      "created_at": "2026-03-24T00:00:00.000Z",
+      "updated_at": "2026-03-24T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+### `GET /inbox/messages/:message_id`
+
+**CLI**
+
+```bash
+weixin-gateway inbox:show --message-id msg-1
+```
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "message": {
+    "id": "msg-1",
+    "status": "pending",
+    "account_id": "wx-account-1",
+    "user_id": "wx-user-1",
+    "text": "帮我看一下仓库状态"
+  }
+}
+```
+
+### `POST /inbox/messages/:message_id/claim`
+
+claim 用于告诉 gateway：这条消息已经被某个 worker 接手，避免被重复消费。
+
+**CLI**
+
+```bash
+weixin-gateway inbox:claim --message-id msg-1 --worker-id codex
+```
+
+**Request**
+
+```json
+{
+  "worker_id": "codex"
+}
+```
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "message": {
+    "id": "msg-1",
+    "status": "claimed",
+    "claim": {
+      "worker_id": "codex",
+      "claimed_at": "2026-03-24T00:00:05.000Z"
+    }
+  }
+}
+```
+
+### `POST /inbox/messages/:message_id/complete`
+
+**CLI**
+
+```bash
+weixin-gateway inbox:complete --message-id msg-1 --completion-note "reply sent"
+```
+
+**Request**
+
+```json
+{
+  "completion_note": "reply sent"
+}
+```
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "message": {
+    "id": "msg-1",
+    "status": "completed",
+    "completed_at": "2026-03-24T00:00:30.000Z"
+  }
+}
+```
+
+### `POST /inbox/messages/:message_id/fail`
+
+**CLI**
+
+```bash
+weixin-gateway inbox:fail --message-id msg-1 --error "temporary failure"
+```
+
+**Request**
+
+```json
+{
+  "error": "temporary failure"
+}
+```
+
+**Response**
+
+```json
+{
+  "ok": true,
+  "message": {
+    "id": "msg-1",
+    "status": "failed",
+    "error": "temporary failure",
+    "failed_at": "2026-03-24T00:00:30.000Z"
+  }
 }
 ```
 
@@ -1305,17 +1510,19 @@ Gateway 会把入站微信消息转成统一事件并转发给你的上游服务
 
 当前入站附件会落盘到：
 
+- `WEIXIN_GATEWAY_INBOUND_DIR`
+
+如果未显式设置，默认路径是：
+
 - `WEIXIN_GATEWAY_DATA_DIR/inbound`
-
-默认路径：
-
-- `apps/weixin-gateway/.data/inbound`
 
 ## 环境变量
 
 ```bash
 PORT=8787
 WEIXIN_GATEWAY_DATA_DIR=.data
+WEIXIN_GATEWAY_INBOUND_DIR=.data/inbound
+WEIXIN_GATEWAY_DELIVERY_MODE=callback
 UPSTREAM_BASE_URL=http://127.0.0.1:8000
 UPSTREAM_EVENTS_PATH=/callback/weixin-gateway
 UPSTREAM_SHARED_SECRET=
@@ -1331,13 +1538,16 @@ WEIXIN_GATEWAY_VERBOSE_UPDATES=false
 - 仍兼容旧的 `XUANJI_WEIXIN_CALLBACK_PATH`
 - 仍兼容旧的 `XUANJI_SHARED_SECRET`
 - 如果新旧同时存在，优先使用 `UPSTREAM_*`
+- `WEIXIN_GATEWAY_DELIVERY_MODE` 支持：
+  - `callback`
+  - `inbox`
 
 ## 常见操作
 
 ### 导出成独立仓库
 
 ```bash
-cd apps/weixin-gateway
+cd /Users/yonghuang/Codes/xuanji-weixin-gateway
 bash scripts/export-standalone.sh ~/Codes/xuanji-weixin-gateway
 ```
 
@@ -1357,5 +1567,8 @@ pnpm cli -- login:start
 3. 扫码后执行 `weixin-gateway login:watch --session-id <session_id>`
 4. 用 `weixin-gateway accounts` 确认账号已登录
 5. 用 `weixin-gateway poll:status` 确认轮询在运行
-6. 配置 `UPSTREAM_BASE_URL` 和 `UPSTREAM_EVENTS_PATH`
-7. 开始用 `/send` 和上游事件回调接入你的 Agent
+6. 选择一种上游模式：
+   - webhook 模式：配置 `UPSTREAM_BASE_URL` 和 `UPSTREAM_EVENTS_PATH`
+   - inbox 模式：配置 `WEIXIN_GATEWAY_DELIVERY_MODE=inbox`
+7. 如果是 inbox 模式，先用 `weixin-gateway inbox:list --status pending` 验证消息是否可拉取
+8. 开始用 `/send` 和 callback 或 inbox API 接入你的 Agent

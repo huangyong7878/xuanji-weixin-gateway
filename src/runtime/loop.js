@@ -36,7 +36,10 @@ export class PollingLoop {
       return false
     }
     const accounts = await this.store.listAccounts()
-    if (!Array.isArray(accounts) || accounts.length === 0) {
+    const activeAccounts = Array.isArray(accounts)
+      ? accounts.filter((account) => String(account?.session_state || 'active') !== 'expired')
+      : []
+    if (activeAccounts.length === 0) {
       return false
     }
     await this.start()

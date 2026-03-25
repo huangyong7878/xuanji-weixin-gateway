@@ -87,3 +87,42 @@ test('loadConfig auto starts polling by default', () => {
     }
   }
 })
+
+test('loadConfig supports inbox delivery mode', () => {
+  const previous = process.env.WEIXIN_GATEWAY_DELIVERY_MODE
+  process.env.WEIXIN_GATEWAY_DELIVERY_MODE = 'inbox'
+
+  try {
+    const config = loadConfig()
+    assert.equal(config.deliveryMode, 'inbox')
+  } finally {
+    if (previous === undefined) {
+      delete process.env.WEIXIN_GATEWAY_DELIVERY_MODE
+    } else {
+      process.env.WEIXIN_GATEWAY_DELIVERY_MODE = previous
+    }
+  }
+})
+
+test('loadConfig supports explicit inbound dir override', () => {
+  const previous = {
+    WEIXIN_GATEWAY_DATA_DIR: process.env.WEIXIN_GATEWAY_DATA_DIR,
+    WEIXIN_GATEWAY_INBOUND_DIR: process.env.WEIXIN_GATEWAY_INBOUND_DIR,
+  }
+  process.env.WEIXIN_GATEWAY_DATA_DIR = '/tmp/weixin-data'
+  process.env.WEIXIN_GATEWAY_INBOUND_DIR = '/tmp/custom-inbound'
+
+  try {
+    const config = loadConfig()
+    assert.equal(config.dataDir, '/tmp/weixin-data')
+    assert.equal(config.inboundDir, '/tmp/custom-inbound')
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = value
+      }
+    }
+  }
+})

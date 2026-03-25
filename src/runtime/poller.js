@@ -62,13 +62,41 @@ function buildUpstreamEvent(account, message, attachments) {
   }
 }
 
+function shouldEnqueueInbox(config) {
+  return config.deliveryMode === 'inbox'
+}
+
+function shouldForwardCallback(config) {
+  return config.deliveryMode === 'callback'
+}
+
 export async function pollAccountOnce(config, store, accountId) {
   const account = await store.getAccount(accountId)
   if (!account) {
     throw new Error(`unknown account: ${accountId}`)
   }
+  if (String(account.session_state || 'active') === 'expired') {
+    return {
+      account_id: accountId,
+      forwarded: 0,
+      cursor: account.cursor || '',
+      skipped: true,
+      session_state: 'expired',
+    }
+  }
 
-  const updates = await getUpdates(account, account.cursor || '')
+  let updates
+  try {
+    updates = await getUpdates(account, account.cursor || '')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (message === 'session timeout') {
+      await store.updateAccount(accountId, {
+        session_state: 'expired',
+      })
+    }
+    throw error
+  }
   const messages = Array.isArray(updates.msgs) ? updates.msgs : []
   let forwarded = 0
 
@@ -77,14 +105,30 @@ export async function pollAccountOnce(config, store, accountId) {
       continue
     }
     const attachments = await downloadInboundAttachments(message, {
-      dataDir: config.dataDir,
+      inboundDir: config.inboundDir,
       account,
     })
     const event = buildUpstreamEvent(account, message, attachments)
     if (!event) {
       continue
     }
-    await forwardMessageUpstream(config, event)
+    let inboxRecord = null
+    if (shouldEnqueueInbox(config)) {
+      inboxRecord = await store.enqueueInboxMessage(event)
+    }
+    if (shouldForwardCallback(config)) {
+      if (inboxRecord) {
+        await store.updateInboxMessage(inboxRecord.id, {
+          callback_attempted: true,
+        })
+      }
+      await forwardMessageUpstream(config, event)
+      if (inboxRecord) {
+        await store.updateInboxMessage(inboxRecord.id, {
+          callback_succeeded: true,
+        })
+      }
+    }
     forwarded += 1
   }
 
@@ -96,6 +140,7 @@ export async function pollAccountOnce(config, store, accountId) {
     account_id: accountId,
     forwarded,
     cursor: updates.get_updates_buf || account.cursor || '',
+    session_state: 'active',
   }
 }
 

@@ -100,7 +100,7 @@ test('getQrLoginStatus completes account when qr confirmed', async () => {
     assert.equal(updated.state, 'completed')
     assert.equal(updated.account_id, 'bot-1')
     assert.equal(store.accounts.get('bot-1').bot_token, 'bot-token')
-    assert.equal(store.accounts.has('old-bot'), false)
+    assert.equal(store.accounts.has('old-bot'), true)
   } finally {
     globalThis.fetch = originalFetch
   }

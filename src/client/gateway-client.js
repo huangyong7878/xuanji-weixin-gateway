@@ -40,6 +40,38 @@ export function createGatewayClient(baseUrl) {
     async getAccount(accountId) {
       return await requestJson(baseUrl, 'GET', `/accounts/${encodeURIComponent(accountId)}`)
     },
+    async listInboxMessages(options = {}) {
+      const query = new URLSearchParams()
+      if (options.status) {
+        query.set('status', String(options.status))
+      }
+      if (options.limit !== undefined) {
+        query.set('limit', String(options.limit))
+      }
+      if (options.account_id) {
+        query.set('account_id', String(options.account_id))
+      }
+      const suffix = query.size > 0 ? `?${query.toString()}` : ''
+      return await requestJson(baseUrl, 'GET', `/inbox/messages${suffix}`)
+    },
+    async getInboxMessage(messageId) {
+      return await requestJson(baseUrl, 'GET', `/inbox/messages/${encodeURIComponent(messageId)}`)
+    },
+    async claimInboxMessage(messageId, workerId = '') {
+      return await requestJson(baseUrl, 'POST', `/inbox/messages/${encodeURIComponent(messageId)}/claim`, {
+        worker_id: workerId,
+      })
+    },
+    async completeInboxMessage(messageId, completionNote = '') {
+      return await requestJson(baseUrl, 'POST', `/inbox/messages/${encodeURIComponent(messageId)}/complete`, {
+        completion_note: completionNote,
+      })
+    },
+    async failInboxMessage(messageId, error = '') {
+      return await requestJson(baseUrl, 'POST', `/inbox/messages/${encodeURIComponent(messageId)}/fail`, {
+        error,
+      })
+    },
     async startQrLogin(payload) {
       return await requestJson(baseUrl, 'POST', '/login/qr/start', payload)
     },

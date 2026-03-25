@@ -45,7 +45,23 @@ export async function getQrLoginStatus(store, sessionId) {
   if (!session) {
     return null
   }
+  console.info(
+    '[weixin-gateway] qrLogin status check',
+    JSON.stringify({
+      session_id: sessionId,
+      state: session.state,
+      qrcode: session.qrcode || '',
+      api_base_url: session.api_base_url || '',
+    }),
+  )
   if (ACTIVE_POLLING_STATES.has(String(session.state || '')) && isExpired(session)) {
+    console.warn(
+      '[weixin-gateway] qrLogin expired locally',
+      JSON.stringify({
+        session_id: sessionId,
+        state: session.state,
+      }),
+    )
     return await store.updateLoginSession(sessionId, {
         state: 'expired',
         error: 'login session expired',
@@ -57,6 +73,17 @@ export async function getQrLoginStatus(store, sessionId) {
 
   const status = await getQrCodeStatus(session.api_base_url, session.qrcode)
   const nextState = String(status.status || 'pending')
+  console.info(
+    '[weixin-gateway] qrLogin upstream status',
+    JSON.stringify({
+      session_id: sessionId,
+      upstream_status: nextState,
+      has_bot_token: Boolean(status.bot_token),
+      has_ilink_bot_id: Boolean(status.ilink_bot_id),
+      has_baseurl: Boolean(status.baseurl),
+      ilink_user_id: String(status.ilink_user_id || ''),
+    }),
+  )
   if (nextState === 'confirmed' && status.bot_token && status.ilink_bot_id && status.baseurl) {
     const userId = String(status.ilink_user_id || '')
     const account = await store.upsertAccount({
@@ -67,8 +94,16 @@ export async function getQrLoginStatus(store, sessionId) {
       cursor: '',
       created_at: nowIso(),
       user_id: userId,
+      session_state: 'active',
     })
-    await store.removeOtherAccountsForUser(userId, account.account_id)
+    console.info(
+      '[weixin-gateway] qrLogin completed',
+      JSON.stringify({
+        session_id: sessionId,
+        account_id: account.account_id,
+        user_id: userId,
+      }),
+    )
     return await store.updateLoginSession(sessionId, {
       state: 'completed',
       account_id: account.account_id,
@@ -78,6 +113,19 @@ export async function getQrLoginStatus(store, sessionId) {
       ilink_user_id: userId,
       message: '微信登录成功。',
     })
+  }
+
+  if (nextState === 'confirmed') {
+    console.warn(
+      '[weixin-gateway] qrLogin confirmed but incomplete payload',
+      JSON.stringify({
+        session_id: sessionId,
+        has_bot_token: Boolean(status.bot_token),
+        has_ilink_bot_id: Boolean(status.ilink_bot_id),
+        has_baseurl: Boolean(status.baseurl),
+        raw_keys: Object.keys(status || {}),
+      }),
+    )
   }
 
   return await store.updateLoginSession(sessionId, {
@@ -123,6 +171,7 @@ export async function completeQrLogin(store, payload = {}) {
     wechat_uin: wechatUin,
     cursor: '',
     created_at: nowIso(),
+    session_state: 'active',
   })
 
   const completed = await store.updateLoginSession(sessionId, {
