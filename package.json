@@ -1,6 +1,6 @@
 {
   "name": "@bryanhuang7878/weixin-gateway",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": false,
   "type": "module",
   "description": "Standalone Weixin gateway for agent runtimes with callback and inbox delivery",
