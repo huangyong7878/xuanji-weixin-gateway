@@ -26,17 +26,23 @@ export class FileStore {
   async init() {
     await ensureDir(this.dataDir)
     const state = await this.loadState()
-    if (!state.accounts || !state.login_sessions || !state.inbox_messages) {
+    if (!state.accounts || !state.login_sessions || !state.inbox_messages || !state.send_tasks) {
       await this.saveState({
         accounts: state.accounts || {},
         login_sessions: state.login_sessions || {},
         inbox_messages: state.inbox_messages || {},
+        send_tasks: state.send_tasks || {},
       })
     }
   }
 
   async loadState() {
-    return await readJson(this.statePath, { accounts: {}, login_sessions: {}, inbox_messages: {} })
+    return await readJson(this.statePath, {
+      accounts: {},
+      login_sessions: {},
+      inbox_messages: {},
+      send_tasks: {},
+    })
   }
 
   async saveState(state) {
@@ -265,5 +271,32 @@ export class FileStore {
       error: String(error || ''),
       failed_at: new Date().toISOString(),
     })
+  }
+
+  async createSendTask(task) {
+    const state = await this.loadState()
+    state.send_tasks ||= {}
+    state.send_tasks[task.task_id] = task
+    await this.saveState(state)
+    return task
+  }
+
+  async getSendTask(taskId) {
+    const state = await this.loadState()
+    return state.send_tasks?.[taskId] || null
+  }
+
+  async updateSendTask(taskId, patch) {
+    const state = await this.loadState()
+    if (!state.send_tasks?.[taskId]) {
+      return null
+    }
+    state.send_tasks[taskId] = {
+      ...state.send_tasks[taskId],
+      ...patch,
+      updated_at: new Date().toISOString(),
+    }
+    await this.saveState(state)
+    return state.send_tasks[taskId]
   }
 }

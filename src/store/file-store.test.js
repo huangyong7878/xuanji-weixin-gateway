@@ -60,3 +60,47 @@ test('FileStore claim/complete/fail updates inbox message lifecycle', async () =
     await fs.rm(dataDir, { recursive: true, force: true })
   }
 })
+
+test('FileStore create/update send task persists async send lifecycle', async () => {
+  const { store, dataDir } = await createTempStore()
+  try {
+    const created = await store.createSendTask({
+      task_id: 'task-1',
+      status: 'pending',
+      account_id: 'bot-1',
+      to_user_id: 'wx-user-3',
+      chat_type: 'c2c',
+      item_types: ['file'],
+      payload: { items: [{ type: 'file' }] },
+      result: null,
+      error: '',
+      created_at: new Date().toISOString(),
+      updated_at: '',
+      started_at: '',
+      completed_at: '',
+      failed_at: '',
+    })
+    assert.equal(created.task_id, 'task-1')
+    assert.equal(created.status, 'pending')
+
+    const running = await store.updateSendTask('task-1', {
+      status: 'running',
+      started_at: new Date().toISOString(),
+    })
+    assert.equal(running.status, 'running')
+
+    const completed = await store.updateSendTask('task-1', {
+      status: 'completed',
+      result: { ok: true },
+      completed_at: new Date().toISOString(),
+    })
+    assert.equal(completed.status, 'completed')
+    assert.deepEqual(completed.result, { ok: true })
+
+    const loaded = await store.getSendTask('task-1')
+    assert.equal(loaded.status, 'completed')
+    assert.deepEqual(loaded.result, { ok: true })
+  } finally {
+    await fs.rm(dataDir, { recursive: true, force: true })
+  }
+})

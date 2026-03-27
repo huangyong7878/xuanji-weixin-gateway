@@ -1,5 +1,6 @@
 import http from 'node:http'
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import process from 'node:process'
 import { URL } from 'node:url'
 import { fileURLToPath } from 'node:url'
@@ -15,7 +16,8 @@ function createAppContext() {
   const config = loadConfig()
   const store = new FileStore(config.dataDir)
   const pollingLoop = new PollingLoop(config, store)
-  return { config, store, pollingLoop }
+  const sendTaskRuns = new Map()
+  return { config, store, pollingLoop, sendTaskRuns }
 }
 
 async function maybeAutoStartPolling(config, pollingLoop) {
@@ -77,6 +79,24 @@ function buildInboxView(message) {
   }
 }
 
+function buildSendTaskView(task) {
+  return {
+    task_id: task.task_id,
+    status: task.status || 'pending',
+    account_id: task.account_id || '',
+    to_user_id: task.to_user_id || '',
+    chat_type: task.chat_type || 'c2c',
+    item_types: Array.isArray(task.item_types) ? task.item_types : [],
+    error: task.error || '',
+    result: task.result || null,
+    created_at: task.created_at || '',
+    updated_at: task.updated_at || '',
+    started_at: task.started_at || '',
+    completed_at: task.completed_at || '',
+    failed_at: task.failed_at || '',
+  }
+}
+
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body)
   res.writeHead(status, {
@@ -107,7 +127,41 @@ function readJson(req) {
   })
 }
 
-async function handleRequest(req, res, config, store, pollingLoop) {
+function ensureSendTaskRunner(store, sendTaskRuns, taskId) {
+  if (sendTaskRuns.has(taskId)) {
+    return
+  }
+  const runPromise = (async () => {
+    const task = await store.getSendTask(taskId)
+    if (!task) {
+      return
+    }
+    await store.updateSendTask(taskId, {
+      status: 'running',
+      started_at: new Date().toISOString(),
+      error: '',
+    })
+    try {
+      const result = await sendOutboundMessage(store, task.payload || {})
+      await store.updateSendTask(taskId, {
+        status: 'completed',
+        result,
+        completed_at: new Date().toISOString(),
+      })
+    } catch (error) {
+      await store.updateSendTask(taskId, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        failed_at: new Date().toISOString(),
+      })
+    } finally {
+      sendTaskRuns.delete(taskId)
+    }
+  })()
+  sendTaskRuns.set(taskId, runPromise)
+}
+
+async function handleRequest(req, res, config, store, pollingLoop, sendTaskRuns) {
   const method = req.method || 'GET'
   const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`)
 
@@ -502,6 +556,52 @@ async function handleRequest(req, res, config, store, pollingLoop) {
     return
   }
 
+  if (method === 'POST' && url.pathname === '/send/async') {
+    const body = await readJson(req)
+    const taskId = crypto.randomUUID()
+    const now = new Date().toISOString()
+    const task = await store.createSendTask({
+      task_id: taskId,
+      status: 'pending',
+      account_id: String(body.account_id || '').trim(),
+      to_user_id: String(body.to_user_id || '').trim(),
+      chat_type: String(body.chat_type || 'c2c').trim() || 'c2c',
+      item_types: Array.isArray(body.items) ? body.items.map((item) => item?.type ?? '?') : [],
+      payload: body,
+      result: null,
+      error: '',
+      created_at: now,
+      updated_at: now,
+      started_at: '',
+      completed_at: '',
+      failed_at: '',
+    })
+    ensureSendTaskRunner(store, sendTaskRuns, taskId)
+    sendJson(res, 202, {
+      ok: true,
+      task: buildSendTaskView(task),
+    })
+    return
+  }
+
+  if (method === 'GET' && url.pathname.startsWith('/send/tasks/')) {
+    const parts = url.pathname.split('/')
+    const taskId = decodeURIComponent(parts[3] || '')
+    const task = await store.getSendTask(taskId)
+    if (!task) {
+      sendJson(res, 404, {
+        ok: false,
+        error: 'unknown task_id',
+      })
+      return
+    }
+    sendJson(res, 200, {
+      ok: true,
+      task: buildSendTaskView(task),
+    })
+    return
+  }
+
   sendJson(res, 404, {
     ok: false,
     error: 'not_found',
@@ -509,9 +609,9 @@ async function handleRequest(req, res, config, store, pollingLoop) {
 }
 
 export async function startServer() {
-  const { config, store, pollingLoop } = createAppContext()
+  const { config, store, pollingLoop, sendTaskRuns } = createAppContext()
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, config, store, pollingLoop).catch((error) => {
+    handleRequest(req, res, config, store, pollingLoop, sendTaskRuns).catch((error) => {
       sendJson(res, 500, {
         ok: false,
         error: error instanceof Error ? error.message : String(error),
