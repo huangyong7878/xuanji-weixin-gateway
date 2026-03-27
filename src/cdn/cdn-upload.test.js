@@ -83,3 +83,36 @@ test('uploadBufferToCdn does not retry non-timeout CDN error', async () => {
 
   assert.equal(calls, 1)
 })
+
+test('uploadBufferToCdn accepts full upload url directly', async () => {
+  const calls = []
+  const originalFetch = global.fetch
+
+  global.fetch = async (url) => {
+    calls.push(String(url))
+    return {
+      status: 200,
+      headers: {
+        get(name) {
+          return name.toLowerCase() === 'x-encrypted-param' ? 'download-token-full-url' : null
+        },
+      },
+      async text() { return '' },
+    }
+  }
+
+  const result = await uploadBufferToCdn({
+    buf: Buffer.from([1, 2, 3, 4]),
+    uploadFullUrl: 'https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=full-token&filekey=filekey-full',
+    filekey: 'filekey-3',
+    cdnBaseUrl: 'https://novac2c.cdn.weixin.qq.com/c2c',
+    aeskey: AESKEY,
+    timeoutMs: 1000,
+    maxAttempts: 1,
+  })
+
+  global.fetch = originalFetch
+
+  assert.equal(result.downloadParam, 'download-token-full-url')
+  assert.deepEqual(calls, ['https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=full-token&filekey=filekey-full'])
+})

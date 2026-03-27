@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getConfig, getUpdates, sendTextMessage, sendTyping } from './weixin-api.js'
+import { getConfig, getUpdates, getUploadUrl, sendTextMessage, sendTyping } from './weixin-api.js'
 
 const ACCOUNT = {
   api_base_url: 'https://ilinkai.weixin.qq.com',
@@ -139,4 +139,44 @@ test('sendTyping calls ilink/bot/sendtyping with typing_ticket and status', asyn
   assert.equal(body.ilink_user_id, 'user-1')
   assert.equal(body.typing_ticket, 'ticket-1')
   assert.equal(body.status, 1)
+})
+
+test('getUploadUrl logs upload_param presence and response keys', async () => {
+  const originalFetch = global.fetch
+  const originalInfo = console.info
+  const logs = []
+
+  console.info = (...args) => {
+    logs.push(args)
+  }
+  global.fetch = async () => {
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify({ foo: 'bar', errmsg: 'missing upload param' })
+      },
+    }
+  }
+
+  const result = await getUploadUrl(ACCOUNT, {
+    filekey: 'file-key',
+    media_type: 1,
+    to_user_id: 'user-1',
+    rawsize: 12,
+    rawfilemd5: 'abc',
+    filesize: 16,
+    no_need_thumb: true,
+    aeskey: '001122',
+  })
+
+  global.fetch = originalFetch
+  console.info = originalInfo
+
+  assert.deepEqual(result, { foo: 'bar', errmsg: 'missing upload param' })
+  const responseLog = logs.find((entry) => String(entry[0]).includes('getUploadUrl response'))
+  assert.ok(responseLog)
+  const payload = JSON.parse(String(responseLog[1]))
+  assert.equal(payload.has_upload_param, false)
+  assert.deepEqual(payload.keys, ['foo', 'errmsg'])
+  assert.equal(payload.errmsg, 'missing upload param')
 })

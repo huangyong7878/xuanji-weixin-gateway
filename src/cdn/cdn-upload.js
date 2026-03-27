@@ -39,6 +39,7 @@ async function uploadOnce({ ciphertext, cdnUrl, timeoutMs }) {
 export async function uploadBufferToCdn({
   buf,
   uploadParam,
+  uploadFullUrl,
   filekey,
   cdnBaseUrl,
   aeskey,
@@ -46,7 +47,7 @@ export async function uploadBufferToCdn({
   maxAttempts = DEFAULT_CDN_UPLOAD_ATTEMPTS,
 }) {
   const ciphertext = encryptAesEcb(buf, aeskey)
-  const cdnUrl = buildCdnUploadUrl({ cdnBaseUrl, uploadParam, filekey })
+  const cdnUrl = buildCdnUploadUrl({ cdnBaseUrl, uploadParam, uploadFullUrl, filekey })
   let lastError = null
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {

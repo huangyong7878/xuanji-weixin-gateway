@@ -152,12 +152,20 @@ async function postJson(url, body, headers, label = 'postJson') {
   }
 
   if (shouldLogRequest(label)) {
+    const rawSummary =
+      typeof data?.raw === 'string'
+        ? data.raw.slice(0, 500)
+        : null
     console.info(
       `[weixin-gateway] ${label} response`,
       JSON.stringify({
         url,
         ret: data?.ret ?? null,
         errcode: data?.errcode ?? null,
+        errmsg: data?.errmsg ?? data?.error ?? null,
+        has_upload_param: typeof data?.upload_param === 'string' && data.upload_param.length > 0,
+        keys: data && typeof data === 'object' ? Object.keys(data) : [],
+        raw_summary: rawSummary,
       }),
     )
   }

@@ -97,13 +97,16 @@ async function uploadLocalFileToWeixin(account, { filePath, toUserId, mediaType,
     no_need_thumb: true,
     aeskey: aeskey.toString('hex'),
   })
-  if (!uploadUrlResp.upload_param) {
-    throw new Error('getUploadUrl returned no upload_param')
+  const uploadParam = typeof uploadUrlResp.upload_param === 'string' ? uploadUrlResp.upload_param : ''
+  const uploadFullUrl = typeof uploadUrlResp.upload_full_url === 'string' ? uploadUrlResp.upload_full_url : ''
+  if (!uploadParam && !uploadFullUrl) {
+    throw new Error('getUploadUrl returned neither upload_param nor upload_full_url')
   }
 
   const { downloadParam } = await uploadBufferToCdn({
     buf: plaintext,
-    uploadParam: uploadUrlResp.upload_param,
+    uploadParam,
+    uploadFullUrl,
     filekey,
     cdnBaseUrl,
     aeskey,

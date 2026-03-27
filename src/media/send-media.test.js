@@ -69,6 +69,64 @@ test('sendMediaFromPayload uploads and sends image message', async () => {
   assert.equal(sendBody.msg.item_list[0].image_item.media.encrypt_query_param, 'download-token')
 })
 
+test('sendMediaFromPayload accepts upload_full_url from getUploadUrl', async () => {
+  const calls = []
+  const originalFetch = global.fetch
+  global.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init })
+    if (String(url) === 'https://example.com/test-full.png') {
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: { get(name) { return name.toLowerCase() === 'content-type' ? 'image/png' : null } },
+        async arrayBuffer() { return new Uint8Array([1, 2, 3, 4]).buffer },
+      }
+    }
+    if (String(url).endsWith('/ilink/bot/getuploadurl')) {
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            upload_full_url: 'https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=full-token&filekey=filekey-full',
+          })
+        },
+      }
+    }
+    if (String(url) === 'https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=full-token&filekey=filekey-full') {
+      return {
+        status: 200,
+        headers: { get(name) { return name.toLowerCase() === 'x-encrypted-param' ? 'download-token-full' : null } },
+        async text() { return '' },
+      }
+    }
+    if (String(url).endsWith('/ilink/bot/sendmessage')) {
+      return {
+        ok: true,
+        status: 200,
+        async text() { return JSON.stringify({ ret: 0 }) },
+      }
+    }
+    throw new Error(`unexpected fetch: ${url}`)
+  }
+
+  await sendMediaFromPayload(ACCOUNT, {
+    to_user_id: 'user-full',
+    context_token: '',
+    items: [{ type: 'file', file_type: 1, url: 'https://example.com/test-full.png' }],
+  })
+
+  global.fetch = originalFetch
+
+  const uploadCall = calls.find((entry) => entry.url === 'https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=full-token&filekey=filekey-full')
+  assert.ok(uploadCall)
+  const sendCall = calls.find((entry) => entry.url.endsWith('/ilink/bot/sendmessage'))
+  assert.ok(sendCall)
+  const sendBody = JSON.parse(String(sendCall.init.body))
+  assert.equal(sendBody.msg.item_list[0].image_item.media.encrypt_query_param, 'download-token-full')
+})
+
 test('sendMediaFromPayload uploads and sends file attachment', async () => {
   const calls = []
   const originalFetch = global.fetch
