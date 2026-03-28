@@ -48,6 +48,10 @@ export function getMimeFromFilename(filename) {
 }
 
 export function getExtensionFromContentTypeOrUrl(contentType, url) {
+  const ext = path.extname(new URL(url).pathname).toLowerCase()
+  if (EXTENSION_TO_MIME[ext]) {
+    return ext
+  }
   if (contentType) {
     const normalized = String(contentType).split(';')[0].trim().toLowerCase()
     const fromMime = MIME_TO_EXTENSION[normalized]
@@ -55,6 +59,5 @@ export function getExtensionFromContentTypeOrUrl(contentType, url) {
       return fromMime
     }
   }
-  const ext = path.extname(new URL(url).pathname).toLowerCase()
   return EXTENSION_TO_MIME[ext] ? ext : '.bin'
 }

@@ -291,6 +291,7 @@ test('sendMediaFromPayload uploads and sends voice message', async () => {
   assert.equal(sendBody.msg.item_list[0].type, 3)
   assert.equal(sendBody.msg.item_list[0].voice_item.media.encrypt_query_param, 'download-token-voice')
   assert.equal(sendBody.msg.item_list[0].voice_item.encode_type, 7)
+  assert.equal(sendBody.msg.item_list[0].voice_item.sample_rate, 24000)
 })
 
 test('sendMediaFromPayload accepts absolute local file path', async () => {

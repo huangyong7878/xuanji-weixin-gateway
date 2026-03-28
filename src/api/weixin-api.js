@@ -82,6 +82,17 @@ function shouldLogRequest(label) {
   return String(process.env.WEIXIN_GATEWAY_VERBOSE_UPDATES || 'false').toLowerCase() === 'true'
 }
 
+function summarizeRawText(text) {
+  if (typeof text !== 'string') {
+    return null
+  }
+  const compact = text.replace(/\s+/g, ' ').trim()
+  if (!compact) {
+    return null
+  }
+  return compact.slice(0, 500)
+}
+
 async function postJson(url, body, headers, label = 'postJson') {
   if (shouldLogRequest(label)) {
     console.info(
@@ -98,7 +109,16 @@ async function postJson(url, body, headers, label = 'postJson') {
     body: JSON.stringify(body),
   })
 
+  const headerNames = ['content-type', 'content-length', 'x-request-id', 'x-trace-id']
+  const responseHeaders = Object.fromEntries(
+    headerNames
+      .map((name) => [name, response.headers?.get?.(name) || null])
+      .filter(([, value]) => value),
+  )
   const text = await response.text()
+  const contentType = response.headers?.get?.('content-type') || null
+  const bodyLength = typeof text === 'string' ? Buffer.byteLength(text, 'utf8') : 0
+  const rawTextPreview = summarizeRawText(text)
   let data = {}
   if (text) {
     try {
@@ -115,6 +135,10 @@ async function postJson(url, body, headers, label = 'postJson') {
       JSON.stringify({
         url,
         status: response.status,
+        content_type: contentType,
+        body_length: bodyLength,
+        response_headers: responseHeaders,
+        raw_text_preview: rawTextPreview,
         message,
         response: data,
       }),
@@ -130,6 +154,11 @@ async function postJson(url, body, headers, label = 'postJson') {
         url,
         ret: data.ret,
         errcode: data?.errcode ?? null,
+        status: response.status,
+        content_type: contentType,
+        body_length: bodyLength,
+        response_headers: responseHeaders,
+        raw_text_preview: rawTextPreview,
         message,
         response: data,
       }),
@@ -144,6 +173,11 @@ async function postJson(url, body, headers, label = 'postJson') {
         url,
         ret: data?.ret ?? null,
         errcode: data.errcode,
+        status: response.status,
+        content_type: contentType,
+        body_length: bodyLength,
+        response_headers: responseHeaders,
+        raw_text_preview: rawTextPreview,
         message,
         response: data,
       }),
@@ -160,12 +194,17 @@ async function postJson(url, body, headers, label = 'postJson') {
       `[weixin-gateway] ${label} response`,
       JSON.stringify({
         url,
+        status: response.status,
+        content_type: contentType,
+        body_length: bodyLength,
+        response_headers: responseHeaders,
         ret: data?.ret ?? null,
         errcode: data?.errcode ?? null,
         errmsg: data?.errmsg ?? data?.error ?? null,
         has_upload_param: typeof data?.upload_param === 'string' && data.upload_param.length > 0,
         keys: data && typeof data === 'object' ? Object.keys(data) : [],
         raw_summary: rawSummary,
+        raw_text_preview: rawTextPreview,
       }),
     )
   }

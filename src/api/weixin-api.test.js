@@ -152,6 +152,8 @@ test('getUploadUrl logs upload_param presence and response keys', async () => {
   global.fetch = async () => {
     return {
       ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
       async text() {
         return JSON.stringify({ foo: 'bar', errmsg: 'missing upload param' })
       },
@@ -176,7 +178,52 @@ test('getUploadUrl logs upload_param presence and response keys', async () => {
   const responseLog = logs.find((entry) => String(entry[0]).includes('getUploadUrl response'))
   assert.ok(responseLog)
   const payload = JSON.parse(String(responseLog[1]))
+  assert.equal(payload.status, 200)
+  assert.equal(payload.content_type, 'application/json')
+  assert.equal(typeof payload.body_length, 'number')
+  assert.ok(payload.body_length > 0)
+  assert.deepEqual(payload.response_headers, { 'content-type': 'application/json' })
   assert.equal(payload.has_upload_param, false)
   assert.deepEqual(payload.keys, ['foo', 'errmsg'])
   assert.equal(payload.errmsg, 'missing upload param')
+  assert.match(String(payload.raw_text_preview), /missing upload param/)
+})
+
+test('sendTextMessage logs empty response body details', async () => {
+  const originalFetch = global.fetch
+  const originalInfo = console.info
+  const logs = []
+
+  console.info = (...args) => {
+    logs.push(args)
+  }
+  global.fetch = async () => {
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/plain; charset=utf-8' }),
+      async text() {
+        return ''
+      },
+    }
+  }
+
+  await sendTextMessage(ACCOUNT, {
+    to_user_id: 'user-1',
+    context_token: 'ctx-1',
+    text: 'hello',
+  })
+
+  global.fetch = originalFetch
+  console.info = originalInfo
+
+  const responseLog = logs.find((entry) => String(entry[0]).includes('sendTextMessage response'))
+  assert.ok(responseLog)
+  const payload = JSON.parse(String(responseLog[1]))
+  assert.equal(payload.status, 200)
+  assert.equal(payload.content_type, 'text/plain; charset=utf-8')
+  assert.equal(payload.body_length, 0)
+  assert.deepEqual(payload.response_headers, { 'content-type': 'text/plain; charset=utf-8' })
+  assert.equal(payload.raw_text_preview, null)
+  assert.deepEqual(payload.keys, [])
 })

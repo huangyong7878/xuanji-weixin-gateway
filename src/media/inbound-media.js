@@ -88,21 +88,22 @@ async function downloadInboundVoice(item, inboundDir, cdnBaseUrl, index) {
     return null
   }
   const silkBuf = await downloadAndDecryptBuffer(encryptedQueryParam, aesKey, cdnBaseUrl)
-  const wavBuf = await silkToWav(silkBuf)
-  if (wavBuf) {
-    const filePath = await saveBuffer(inboundDir, buildStoredFileName('voice', index, '', '.wav'), wavBuf)
-    return {
-      kind: 'voice',
-      path: filePath,
-      media_type: 'audio/wav',
-    }
-  }
-  const filePath = await saveBuffer(inboundDir, buildStoredFileName('voice', index, '', '.silk'), silkBuf)
-  return {
+  const silkPath = await saveBuffer(inboundDir, buildStoredFileName('voice', index, '', '.silk'), silkBuf)
+  const attachment = {
     kind: 'voice',
-    path: filePath,
+    path: silkPath,
     media_type: 'audio/silk',
   }
+  const wavBuf = await silkToWav(silkBuf)
+  if (wavBuf) {
+    const wavPath = await saveBuffer(inboundDir, buildStoredFileName('voice', index, '', '.wav'), wavBuf)
+    return {
+      ...attachment,
+      decoded_path: wavPath,
+      decoded_media_type: 'audio/wav',
+    }
+  }
+  return attachment
 }
 
 export async function downloadInboundAttachments(message, { inboundDir, account }) {

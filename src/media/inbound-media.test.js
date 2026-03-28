@@ -134,7 +134,7 @@ test('downloadInboundAttachments saves decrypted inbound video', async () => {
   assert.deepEqual([...saved], [5, 4, 3, 2, 1])
 })
 
-test('downloadInboundAttachments saves decrypted inbound voice as raw silk when transcoder is unavailable', async () => {
+test('downloadInboundAttachments always keeps decrypted inbound voice as raw silk', async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'weixin-inbound-voice-'))
   const aesHex = '00112233445566778899aabbccddeeff'
   const aesBase64 = Buffer.from(aesHex, 'hex').toString('base64')
@@ -172,7 +172,8 @@ test('downloadInboundAttachments saves decrypted inbound voice as raw silk when 
 
   assert.equal(attachments.length, 1)
   assert.equal(attachments[0].kind, 'voice')
-  assert.equal(['audio/silk', 'audio/wav'].includes(attachments[0].media_type), true)
+  assert.equal(attachments[0].media_type, 'audio/silk')
+  assert.equal(attachments[0].path.endsWith('.silk'), true)
   const saved = await fs.readFile(attachments[0].path)
   assert.equal(saved.length > 0, true)
 })

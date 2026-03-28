@@ -1,5 +1,13 @@
 const SILK_SAMPLE_RATE = 24_000
 
+export function normalizeSilkBuffer(silkBuf) {
+  const buf = Buffer.isBuffer(silkBuf) ? silkBuf : Buffer.from(silkBuf)
+  if (buf[0] === 0x02 && buf.subarray(1, 7).toString('ascii') === '#!SILK') {
+    return buf.subarray(1)
+  }
+  return buf
+}
+
 function pcmBytesToWav(pcm, sampleRate) {
   const pcmBytes = pcm.byteLength
   const totalSize = 44 + pcmBytes
@@ -42,7 +50,8 @@ function pcmBytesToWav(pcm, sampleRate) {
 export async function silkToWav(silkBuf) {
   try {
     const { decode } = await import('silk-wasm')
-    const result = await decode(silkBuf, SILK_SAMPLE_RATE)
+    const normalized = normalizeSilkBuffer(silkBuf)
+    const result = await decode(normalized, SILK_SAMPLE_RATE)
     return pcmBytesToWav(result.data, SILK_SAMPLE_RATE)
   } catch {
     return null
