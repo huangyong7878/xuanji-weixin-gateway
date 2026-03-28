@@ -103,6 +103,15 @@ async function uploadLocalFileToWeixin(account, { filePath, toUserId, mediaType,
     throw new Error('getUploadUrl returned neither upload_param nor upload_full_url')
   }
 
+  console.error('[weixin-gateway] uploadLocalFileToWeixin prepared', JSON.stringify({
+    to_user_id: toUserId,
+    media_type: mediaType,
+    file_name: filePath instanceof URL ? path.basename(filePath.pathname) : path.basename(String(filePath)),
+    raw_size: rawsize,
+    ciphertext_size: filesize,
+    has_upload_param: Boolean(uploadParam),
+    has_upload_full_url: Boolean(uploadFullUrl),
+  }))
   const { downloadParam } = await uploadBufferToCdn({
     buf: plaintext,
     uploadParam,
@@ -258,6 +267,14 @@ export async function sendMediaFromPayload(account, payload, options = {}) {
     mediaType: uploadMediaType,
     cdnBaseUrl,
   })
+  console.error('[weixin-gateway] sendMediaFromPayload uploaded', JSON.stringify({
+    to_user_id: payload.to_user_id,
+    file_type: fileType,
+    media_type: uploadMediaType,
+    uploaded_file_name: uploaded.fileName,
+    uploaded_file_size: uploaded.fileSize,
+    uploaded_ciphertext_size: uploaded.fileSizeCiphertext,
+  }))
   try {
     if (fileType === 1) {
       return await sendImageMessage(account, {

@@ -19,6 +19,17 @@ function isRetryableCdnUploadError(error) {
 }
 
 async function uploadOnce({ ciphertext, cdnUrl, timeoutMs }) {
+  console.error('[weixin-gateway] uploadBufferToCdn request', JSON.stringify({
+    cdn_url_host: (() => {
+      try {
+        return new URL(cdnUrl).host
+      } catch {
+        return ''
+      }
+    })(),
+    ciphertext_size: ciphertext.byteLength,
+    timeout_ms: timeoutMs,
+  }))
   const response = await fetch(cdnUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
@@ -33,6 +44,10 @@ async function uploadOnce({ ciphertext, cdnUrl, timeoutMs }) {
   if (!downloadParam) {
     throw new Error('CDN upload response missing x-encrypted-param header')
   }
+  console.error('[weixin-gateway] uploadBufferToCdn response', JSON.stringify({
+    status: response.status,
+    has_download_param: true,
+  }))
   return { downloadParam }
 }
 
@@ -52,9 +67,19 @@ export async function uploadBufferToCdn({
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
+      console.error('[weixin-gateway] uploadBufferToCdn attempt', JSON.stringify({
+        attempt,
+        max_attempts: maxAttempts,
+      }))
       return await uploadOnce({ ciphertext, cdnUrl, timeoutMs })
     } catch (error) {
       lastError = error
+      console.error('[weixin-gateway] uploadBufferToCdn failure', JSON.stringify({
+        attempt,
+        max_attempts: maxAttempts,
+        error: String(error?.message || error || ''),
+        retryable: isRetryableCdnUploadError(error),
+      }))
       if (!isRetryableCdnUploadError(error) || attempt >= maxAttempts) {
         throw error
       }
