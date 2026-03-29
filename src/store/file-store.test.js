@@ -105,46 +105,42 @@ test('FileStore create/update send task persists async send lifecycle', async ()
   }
 })
 
-test('FileStore logs parse failure for corrupted state file', async () => {
+test('FileStore migrates legacy state.json into sqlite and renames source file', async () => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'weixin-gateway-store-'))
-  const statePath = path.join(dataDir, 'state.json')
-  const errors = []
-  const originalError = console.error
-  console.error = (...args) => {
-    errors.push(args.map((part) => String(part)).join(' '))
-  }
   try {
-    await fs.writeFile(statePath, '{bad json', 'utf8')
+    await fs.writeFile(
+      path.join(dataDir, 'state.json'),
+      JSON.stringify({
+        accounts: {
+          'bot-1': { account_id: 'bot-1', user_id: 'wx-1', wechat_uin: 'wx-1', updated_at: '2026-01-01T00:00:00.000Z' },
+        },
+        login_sessions: {
+          'sess-1': { session_id: 'sess-1', state: 'pending', expires_at_ms: 123, updated_at: '2026-01-01T00:00:00.000Z' },
+        },
+        inbox_messages: {
+          'msg-1': { id: 'msg-1', status: 'pending', account_id: 'bot-1', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' },
+        },
+        send_tasks: {
+          'task-1': { task_id: 'task-1', status: 'failed', account_id: 'bot-1', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' },
+        },
+      }),
+      'utf8',
+    )
     const store = new FileStore(dataDir)
-    const state = await store.loadState()
-    assert.deepEqual(state.accounts, {})
-    assert.ok(errors.some((line) => line.includes('parseState failed')))
-  } finally {
-    console.error = originalError
-    await fs.rm(dataDir, { recursive: true, force: true })
-  }
-})
-
-test('FileStore logs when accounts drop to zero', async () => {
-  const { store, dataDir } = await createTempStore()
-  const errors = []
-  const originalError = console.error
-  console.error = (...args) => {
-    errors.push(args.map((part) => String(part)).join(' '))
-  }
-  try {
-    await store.upsertAccount({ account_id: 'bot-1', user_id: 'wx-1' })
-    const state = await store.loadState()
-    state.accounts = {}
-    await store.saveState(state)
-    assert.ok(errors.some((line) => line.includes('accounts dropped to zero')))
+    await store.init()
+    const account = await store.getAccount('bot-1')
+    const session = await store.getLoginSession('sess-1')
+    const inbox = await store.getInboxMessage('msg-1')
+    const task = await store.getSendTask('task-1')
+    assert.equal(account.account_id, 'bot-1')
+    assert.equal(session.session_id, 'sess-1')
+    assert.equal(inbox.id, 'msg-1')
+    assert.equal(task.task_id, 'task-1')
     const files = await fs.readdir(dataDir)
-    const backupName = files.find((name) => name.startsWith('state.before-zero-accounts.'))
-    assert.ok(backupName)
-    const backup = JSON.parse(await fs.readFile(path.join(dataDir, backupName), 'utf8'))
-    assert.equal(backup.accounts['bot-1'].account_id, 'bot-1')
+    assert.ok(files.includes('state.sqlite'))
+    assert.ok(files.some((name) => name.startsWith('state.json.migrated.')))
+    assert.equal(files.includes('state.json'), false)
   } finally {
-    console.error = originalError
     await fs.rm(dataDir, { recursive: true, force: true })
   }
 })

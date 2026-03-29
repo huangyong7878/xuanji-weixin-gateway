@@ -42,5 +42,8 @@
     "cli": "node src/cli.js",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0"
   }
 }
