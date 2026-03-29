@@ -27,7 +27,7 @@ async function maybeAutoStartPolling(config, pollingLoop) {
   return await pollingLoop.startIfNeeded()
 }
 
-function buildAccountStatus(account) {
+function buildAccountStatus(account, pollingLoop) {
   const polling = pollingLoop.status
   const lastResult = Array.isArray(polling.last_results)
     ? polling.last_results.find((item) => item?.account_id === account.account_id) || null
@@ -43,7 +43,7 @@ function buildAccountStatus(account) {
   }
 }
 
-function buildAccountView(account) {
+function buildAccountView(account, pollingLoop) {
   return {
     account_id: account.account_id,
     api_base_url: account.api_base_url,
@@ -51,7 +51,7 @@ function buildAccountView(account) {
     cursor: account.cursor || '',
     created_at: account.created_at || '',
     updated_at: account.updated_at || '',
-    status: buildAccountStatus(account),
+    status: buildAccountStatus(account, pollingLoop),
   }
 }
 
