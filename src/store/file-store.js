@@ -3,16 +3,61 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 
 const STATE_FILE = 'state.json'
+const STATE_TMP_FILE = 'state.json.tmp'
+const ZERO_ACCOUNTS_BACKUP_PREFIX = 'state.before-zero-accounts'
+const LOG_PREFIX = '[weixin-gateway] FileStore'
 
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true })
 }
 
+function summarizeState(state) {
+  return {
+    accounts: Object.keys(state?.accounts || {}).length,
+    login_sessions: Object.keys(state?.login_sessions || {}).length,
+    inbox_messages: Object.keys(state?.inbox_messages || {}).length,
+    send_tasks: Object.keys(state?.send_tasks || {}).length,
+  }
+}
+
+function previewRaw(raw) {
+  return String(raw || '').replace(/\s+/g, ' ').slice(0, 200)
+}
+
+function buildZeroAccountsBackupPath(dataDir) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  return path.join(dataDir, `${ZERO_ACCOUNTS_BACKUP_PREFIX}.${timestamp}.json`)
+}
+
 async function readJson(filePath, fallback) {
+  let raw = ''
   try {
-    const raw = await fs.readFile(filePath, 'utf8')
+    raw = await fs.readFile(filePath, 'utf8')
+  } catch (error) {
+    if (error && error.code !== 'ENOENT') {
+      console.error(
+        `${LOG_PREFIX} readState failed`,
+        JSON.stringify({
+          path: filePath,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      )
+    }
+    return fallback
+  }
+
+  try {
     return JSON.parse(raw)
-  } catch {
+  } catch (error) {
+    console.error(
+      `${LOG_PREFIX} parseState failed`,
+      JSON.stringify({
+        path: filePath,
+        error: error instanceof Error ? error.message : String(error),
+        body_length: raw.length,
+        raw_preview: previewRaw(raw),
+      }),
+    )
     return fallback
   }
 }
@@ -21,6 +66,7 @@ export class FileStore {
   constructor(dataDir) {
     this.dataDir = dataDir
     this.statePath = path.join(dataDir, STATE_FILE)
+    this.stateTmpPath = path.join(dataDir, STATE_TMP_FILE)
   }
 
   async init() {
@@ -34,6 +80,13 @@ export class FileStore {
         send_tasks: state.send_tasks || {},
       })
     }
+    console.info(
+      `${LOG_PREFIX} init`,
+      JSON.stringify({
+        path: this.statePath,
+        ...summarizeState(await this.loadState()),
+      }),
+    )
   }
 
   async loadState() {
@@ -47,7 +100,26 @@ export class FileStore {
 
   async saveState(state) {
     await ensureDir(this.dataDir)
-    await fs.writeFile(this.statePath, JSON.stringify(state, null, 2), 'utf8')
+    const previous = await this.loadState()
+    const before = summarizeState(previous)
+    const after = summarizeState(state)
+    if (before.accounts > 0 && after.accounts === 0) {
+      const backupPath = buildZeroAccountsBackupPath(this.dataDir)
+      await fs.writeFile(backupPath, JSON.stringify(previous, null, 2), 'utf8')
+      console.error(
+        `${LOG_PREFIX} accounts dropped to zero`,
+        JSON.stringify({
+          path: this.statePath,
+          before,
+          after,
+          previous_account_ids: Object.keys(previous.accounts || {}),
+          backup_path: backupPath,
+        }),
+      )
+    }
+    const payload = JSON.stringify(state, null, 2)
+    await fs.writeFile(this.stateTmpPath, payload, 'utf8')
+    await fs.rename(this.stateTmpPath, this.statePath)
   }
 
   async listAccounts() {
@@ -69,6 +141,15 @@ export class FileStore {
       updated_at: new Date().toISOString(),
     }
     await this.saveState(state)
+    console.info(
+      `${LOG_PREFIX} upsertAccount`,
+      JSON.stringify({
+        account_id: account.account_id,
+        user_id: String(account.user_id || ''),
+        wechat_uin: String(account.wechat_uin || ''),
+        account_count: Object.keys(state.accounts || {}).length,
+      }),
+    )
     return state.accounts[account.account_id]
   }
 
@@ -80,6 +161,13 @@ export class FileStore {
     }
     delete state.accounts[accountId]
     await this.saveState(state)
+    console.warn(
+      `${LOG_PREFIX} removeAccount`,
+      JSON.stringify({
+        account_id: accountId,
+        remaining_account_ids: Object.keys(state.accounts || {}),
+      }),
+    )
     return existing
   }
 
@@ -101,6 +189,15 @@ export class FileStore {
     }
     if (removed.length > 0) {
       await this.saveState(state)
+      console.warn(
+        `${LOG_PREFIX} removeOtherAccountsForUser`,
+        JSON.stringify({
+          user_id: userId,
+          keep_account_id: keepAccountId,
+          removed_account_ids: removed,
+          remaining_account_ids: Object.keys(state.accounts || {}),
+        }),
+      )
     }
     return removed
   }

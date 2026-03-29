@@ -104,3 +104,47 @@ test('FileStore create/update send task persists async send lifecycle', async ()
     await fs.rm(dataDir, { recursive: true, force: true })
   }
 })
+
+test('FileStore logs parse failure for corrupted state file', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'weixin-gateway-store-'))
+  const statePath = path.join(dataDir, 'state.json')
+  const errors = []
+  const originalError = console.error
+  console.error = (...args) => {
+    errors.push(args.map((part) => String(part)).join(' '))
+  }
+  try {
+    await fs.writeFile(statePath, '{bad json', 'utf8')
+    const store = new FileStore(dataDir)
+    const state = await store.loadState()
+    assert.deepEqual(state.accounts, {})
+    assert.ok(errors.some((line) => line.includes('parseState failed')))
+  } finally {
+    console.error = originalError
+    await fs.rm(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('FileStore logs when accounts drop to zero', async () => {
+  const { store, dataDir } = await createTempStore()
+  const errors = []
+  const originalError = console.error
+  console.error = (...args) => {
+    errors.push(args.map((part) => String(part)).join(' '))
+  }
+  try {
+    await store.upsertAccount({ account_id: 'bot-1', user_id: 'wx-1' })
+    const state = await store.loadState()
+    state.accounts = {}
+    await store.saveState(state)
+    assert.ok(errors.some((line) => line.includes('accounts dropped to zero')))
+    const files = await fs.readdir(dataDir)
+    const backupName = files.find((name) => name.startsWith('state.before-zero-accounts.'))
+    assert.ok(backupName)
+    const backup = JSON.parse(await fs.readFile(path.join(dataDir, backupName), 'utf8'))
+    assert.equal(backup.accounts['bot-1'].account_id, 'bot-1')
+  } finally {
+    console.error = originalError
+    await fs.rm(dataDir, { recursive: true, force: true })
+  }
+})
