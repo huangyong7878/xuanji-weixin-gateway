@@ -4,6 +4,10 @@ import { encryptAesEcb } from './aes-ecb.js'
 const DEFAULT_CDN_UPLOAD_TIMEOUT_MS = 30_000
 const DEFAULT_CDN_UPLOAD_ATTEMPTS = 3
 
+function nowIso() {
+  return new Date().toISOString()
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -19,7 +23,8 @@ function isRetryableCdnUploadError(error) {
 }
 
 async function uploadOnce({ ciphertext, cdnUrl, timeoutMs }) {
-  console.error('[weixin-gateway] uploadBufferToCdn request', JSON.stringify({
+  console.error('[weixin-gateway]  request', JSON.stringify({
+    timestamp: nowIso(),
     cdn_url_host: (() => {
       try {
         return new URL(cdnUrl).host
@@ -45,6 +50,7 @@ async function uploadOnce({ ciphertext, cdnUrl, timeoutMs }) {
     throw new Error('CDN upload response missing x-encrypted-param header')
   }
   console.error('[weixin-gateway] uploadBufferToCdn response', JSON.stringify({
+    timestamp: nowIso(),
     status: response.status,
     has_download_param: true,
   }))
@@ -68,6 +74,7 @@ export async function uploadBufferToCdn({
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       console.error('[weixin-gateway] uploadBufferToCdn attempt', JSON.stringify({
+        timestamp: nowIso(),
         attempt,
         max_attempts: maxAttempts,
       }))
@@ -75,12 +82,13 @@ export async function uploadBufferToCdn({
     } catch (error) {
       lastError = error
       console.error('[weixin-gateway] uploadBufferToCdn failure', JSON.stringify({
+        timestamp: nowIso(),
         attempt,
         max_attempts: maxAttempts,
         error: String(error?.message || error || ''),
         retryable: isRetryableCdnUploadError(error),
       }))
-      if (!isRetryableCdnUploadError(error) || attempt >= maxAttempts) {
+      if ( attempt >= maxAttempts) {
         throw error
       }
       await sleep(300 * attempt)
